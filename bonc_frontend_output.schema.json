@@ -1,0 +1,316 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "version": {
+      "const": 0
+    },
+    "info": {
+      "type": "object",
+      "title": "加密算法信息",
+      "properties": {
+        "categories": {
+          "type": "array",
+          "title": "加密算法类别",
+          "items": {
+            "enum": [
+              "block_cipher",
+              "hash_function",
+              "stream_cipher",
+              "aead",
+              "ae",
+              "mac"
+            ]
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "meta_parameters": {
+      "type": "array",
+      "title": "元参数（超参数）",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "components": {
+      "type": "object",
+      "title": "解析得到的加密算法组件",
+      "properties": {
+        "sboxes": {
+          "type": "array",
+          "title": "所有 S-盒定义",
+          "items": {
+            "type": "object",
+            "title": "单个 S-盒",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "input_width": {
+                "type": "integer"
+              },
+              "output_width": {
+                "type": "integer"
+              }
+            }
+          },
+          "required": [
+            "name",
+            "value"
+          ]
+        }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "title": "所有传入算法的输入符号",
+      "items": {
+        "type": "object",
+        "title": "单块算法输入",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "size"
+        ]
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "title": "所有作为算法输出的符号",
+      "items": {
+        "type": "object",
+        "title": "单块算法输出",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "expressions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/bit_expression"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "expressions"
+        ]
+      }
+    },
+    "iterations": {
+      "type": "array",
+      "title": "轮次迭代信息",
+      "items": {
+        "type": "object",
+        "title": "内存块状态更新情况",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "update_expressions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/bit_expression"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "size",
+          "update_expressions"
+        ]
+      }
+    }
+  },
+  "required": [
+    "version",
+    "info",
+    "inputs",
+    "outputs",
+    "iterations"
+  ],
+  "definitions": {
+    "bit_expression": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/read_expression"
+        },
+        {
+          "$ref": "#/definitions/lookup_expression"
+        },
+        {
+          "$ref": "#/definitions/constant_expression"
+        },
+        {
+          "$ref": "#/definitions/unary_expression"
+        },
+        {
+          "$ref": "#/definitions/binary_expression"
+        }
+      ]
+    },
+    "read_expression": {
+      "type": "object",
+      "title": "内存读取",
+      "properties": {
+        "type": {
+          "const": "read"
+        },
+        "target_kind": {
+          "enum": [
+            "input",
+            "state"
+          ]
+        },
+        "target_name": {
+          "type": "string"
+        },
+        "offset": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "target_kind",
+        "target_name",
+        "offset"
+      ]
+    },
+    "lookup_expression": {
+      "type": "object",
+      "title": "查表",
+      "properties": {
+        "type": {
+          "const": "lookup"
+        },
+        "table_name": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/bit_expression"
+          }
+        },
+        "output_offset": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "table_name",
+        "inputs",
+        "output_offset"
+      ]
+    },
+    "constant_expression": {
+      "type": "object",
+      "title": "常量",
+      "properties": {
+        "type": {
+          "const": "constant"
+        },
+        "value": {
+          "enum": [
+            0,
+            1
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ]
+    },
+    "unary_expression": {
+      "type": "object",
+      "title": "一元表达式",
+      "properties": {
+        "type": {
+          "const": "unary"
+        },
+        "operator": {
+          "enum": [
+            "not"
+          ]
+        },
+        "operand": {
+          "$ref": "#/definitions/bit_expression"
+        }
+      },
+      "required": [
+        "type",
+        "operator",
+        "operand"
+      ]
+    },
+    "binary_expression": {
+      "type": "object",
+      "title": "二元表达式",
+      "properties": {
+        "type": {
+          "const": "binary"
+        },
+        "operator": {
+          "enum": [
+            "and",
+            "or",
+            "xor"
+          ]
+        },
+        "left": {
+          "$ref": "#/definitions/bit_expression"
+        },
+        "right": {
+          "$ref": "#/definitions/bit_expression"
+        }
+      },
+      "required": [
+        "type",
+        "operator",
+        "left",
+        "right"
+      ]
+    }
+  }
+}
