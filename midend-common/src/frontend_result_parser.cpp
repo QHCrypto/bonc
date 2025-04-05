@@ -11,7 +11,8 @@ std::vector<OutputInfo> FrontendResultParser::parseAll() {
   for (const auto& input : value.at("inputs")) {
     auto name = input.at("name").get<std::string>();
     auto size = input.at("size").get<std::size_t>();
-    read_targets["input:" + name] = std::make_shared<ReadTarget>(ReadTarget::Input, name, size);
+    read_targets["input:" + name] =
+        std::make_shared<ReadTarget>(ReadTarget::Input, name, size);
   }
 
   // Parse components.sboxes
@@ -142,6 +143,39 @@ std::shared_ptr<ReadTarget> FrontendResultParser::getReadTarget(
 std::shared_ptr<LookupTable> FrontendResultParser::getLookupTable(
     const std::string& name) const {
   return lookup_tables.at(name);
+}
+
+ANFPolynomial<std::shared_ptr<ReadBitExpr>> bitExprToANF(
+    std::shared_ptr<BitExpr> expr) {
+  switch (expr->getKind()) {
+    case BitExpr::Constant:
+      return ANFPolynomial<std::shared_ptr<ReadBitExpr>>(
+          static_cast<ConstantBitExpr*>(expr.get())->getValue());
+    case BitExpr::Read:
+      return ANFPolynomial<std::shared_ptr<ReadBitExpr>>::fromVariable(
+          std::static_pointer_cast<ReadBitExpr>(expr));
+    case BitExpr::Lookup:
+      throw std::runtime_error("Lookup expr not implemented");
+    case BitExpr::Not:
+      return !bitExprToANF(
+          std::static_pointer_cast<NotBitExpr>(expr)->getExpr());
+    case BitExpr::And: {
+      auto binary_expr = std::static_pointer_cast<BinaryBitExpr>(expr);
+      return bitExprToANF(binary_expr->getLeft())
+           * bitExprToANF(binary_expr->getRight());
+    }
+    case BitExpr::Xor: {
+      auto binary_expr = std::static_pointer_cast<BinaryBitExpr>(expr);
+      return bitExprToANF(binary_expr->getLeft())
+           + bitExprToANF(binary_expr->getRight());
+    }
+    case BitExpr::Or: {
+      auto binary_expr = std::static_pointer_cast<BinaryBitExpr>(expr);
+      return !(!bitExprToANF(binary_expr->getLeft())
+               * !bitExprToANF(binary_expr->getRight()));
+    }
+    default: throw std::runtime_error("Unknown BitExpr kind");
+  }
 }
 
 }  // namespace bonc

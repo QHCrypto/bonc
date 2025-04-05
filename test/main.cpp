@@ -9,6 +9,7 @@ int main() {
     std::cout << "Output: " << info.name << ", Size: " << info.size << "\n";
     for (auto& expr : info.expressions) {
       expr->print(std::cout);
+      bitExprToANF(expr).print(std::cout);
       std::cout << "\n";
     }
   }

@@ -7,6 +7,7 @@
 
 #include "lookup_table.h"
 #include "read_target.h"
+#include "anf.h"
 
 namespace bonc {
 
@@ -204,5 +205,7 @@ public:
 
   void print(std::ostream& os) const override;
 };
+
+ANFPolynomial<std::shared_ptr<ReadBitExpr>> bitExprToANF(std::shared_ptr<BitExpr> expr);
 
 }  // namespace bonc
