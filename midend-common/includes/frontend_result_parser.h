@@ -1,38 +1,40 @@
 #pragma once
 
+#include <boost/functional/hash.hpp>
 #include <cassert>
 #include <iostream>
 #include <memory>
 #include <nlohmann/json.hpp>
 
+#include "anf.h"
 #include "lookup_table.h"
 #include "read_target.h"
-#include "anf.h"
+#include "ref.h"
 
 namespace bonc {
 
 struct OutputInfo {
   std::string name;
   unsigned size;
-  std::vector<std::shared_ptr<BitExpr>> expressions;
+  std::vector<Ref<BitExpr>> expressions;
 };
 
 class FrontendResultParser {
 private:
   nlohmann::json value;
-  std::map<std::string, std::shared_ptr<ReadTarget>> read_targets;
-  std::map<std::string, std::shared_ptr<LookupTable>> lookup_tables;
+  std::map<std::string, Ref<ReadTarget>> read_targets;
+  std::map<std::string, Ref<LookupTable>> lookup_tables;
 
 public:
   FrontendResultParser(std::istream& json_content);
 
   std::vector<OutputInfo> parseAll();
 
-  std::shared_ptr<ReadTarget> getReadTarget(const std::string& name) const;
-  std::shared_ptr<LookupTable> getLookupTable(const std::string& name) const;
+  Ref<ReadTarget> getReadTarget(const std::string& name) const;
+  Ref<LookupTable> getLookupTable(const std::string& name) const;
 };
 
-class BitExpr {
+class BitExpr : public boost::intrusive_ref_counter<BitExpr> {
 public:
   enum Kind {
     Constant = 0,
@@ -49,8 +51,8 @@ public:
   virtual Kind getKind() const = 0;
   virtual void print(std::ostream& os) const = 0;
 
-  static std::shared_ptr<BitExpr> fromJSON(const FrontendResultParser& parser,
-                                           const nlohmann::json& j);
+  static Ref<BitExpr> fromJSON(const FrontendResultParser& parser,
+                               const nlohmann::json& j);
 };
 
 class ConstantBitExpr : public BitExpr {
@@ -63,8 +65,8 @@ private:
 public:
   ConstantBitExpr(bool value) : value{value} {}
 
-  static std::shared_ptr<ConstantBitExpr> create(bool value) {
-    return std::make_shared<ConstantBitExpr>(value);
+  static Ref<ConstantBitExpr> create(bool value) {
+    return new ConstantBitExpr(value);
   }
 
   Kind getKind() const override {
@@ -80,28 +82,48 @@ public:
   }
 };
 
+struct ReadTargetAndOffset {
+  Ref<ReadTarget> target;
+  unsigned offset;
+
+  ReadTargetAndOffset(Ref<ReadTarget> target, unsigned offset)
+      : target{std::move(target)}, offset{offset} {}
+
+  friend bool operator==(const ReadTargetAndOffset& lhs,
+                         const ReadTargetAndOffset& rhs) = default;
+
+  class Hash {
+  public:
+    std::size_t operator()(const ReadTargetAndOffset& obj) const {
+      return boost::hash<Ref<ReadTarget>>{}(obj.target) ^ obj.offset;
+    }
+  };
+};
+
 class ReadBitExpr : public BitExpr {
 public:
   static const Kind kind = Read;
 
 private:
-  std::shared_ptr<ReadTarget> target;
-  unsigned offset;
+  ReadTargetAndOffset target_and_offset;
 
 public:
-  ReadBitExpr(std::shared_ptr<ReadTarget> target, unsigned offset)
-      : target{std::move(target)}, offset{offset} {}
+  ReadBitExpr(Ref<ReadTarget> target, unsigned offset)
+      : target_and_offset(std::move(target), offset) {}
 
-  static std::shared_ptr<ReadBitExpr> create(std::shared_ptr<ReadTarget> target,
-                                             unsigned offset) {
-    return std::make_shared<ReadBitExpr>(std::move(target), offset);
+  static Ref<ReadBitExpr> create(Ref<ReadTarget> target, unsigned offset) {
+    return new ReadBitExpr(std::move(target), offset);
   }
 
-  std::shared_ptr<ReadTarget> getTarget() const {
-    return target;
+  const ReadTargetAndOffset& getTargetAndOffset() const {
+    return target_and_offset;
+  }
+
+  Ref<ReadTarget> getTarget() const {
+    return target_and_offset.target;
   }
   unsigned getOffset() const {
-    return offset;
+    return target_and_offset.offset;
   }
 
   Kind getKind() const override {
@@ -109,17 +131,6 @@ public:
   }
 
   void print(std::ostream& os) const override;
-
-  friend bool operator==(const ReadBitExpr& lhs, const ReadBitExpr& rhs) {
-    return lhs.target == rhs.target && lhs.offset == rhs.offset;
-  }
-
-  class Hash {
-  public:
-    std::size_t operator()(const ReadBitExpr& expr) const {
-      return std::hash<std::string>()(expr.target->getName()) ^ expr.offset;
-    }
-  };
 };
 
 class LookupBitExpr : public BitExpr {
@@ -127,27 +138,26 @@ public:
   static const Kind kind = Lookup;
 
 private:
-  std::shared_ptr<LookupTable> table;
-  std::vector<std::shared_ptr<BitExpr>> inputs;
+  Ref<LookupTable> table;
+  std::vector<Ref<BitExpr>> inputs;
   unsigned output_offset;
 
 public:
-  LookupBitExpr(std::shared_ptr<LookupTable> table,
-                std::vector<std::shared_ptr<BitExpr>> inputs,
+  LookupBitExpr(Ref<LookupTable> table, std::vector<Ref<BitExpr>> inputs,
                 unsigned output_offset)
       : table{table}, inputs{std::move(inputs)}, output_offset{output_offset} {}
 
-  static std::shared_ptr<LookupBitExpr> create(
-      std::shared_ptr<LookupTable> table,
-      std::vector<std::shared_ptr<BitExpr>> inputs, unsigned output_offset) {
-    return std::make_shared<LookupBitExpr>(std::move(table), std::move(inputs),
-                                           output_offset);
+  static Ref<LookupBitExpr> create(Ref<LookupTable> table,
+                                   std::vector<Ref<BitExpr>> inputs,
+                                   unsigned output_offset) {
+    return new LookupBitExpr(std::move(table), std::move(inputs),
+                             output_offset);
   }
 
-  std::shared_ptr<LookupTable> getTable() const {
+  Ref<LookupTable> getTable() const {
     return table;
   }
-  const std::vector<std::shared_ptr<BitExpr>>& getInputs() const {
+  const std::vector<Ref<BitExpr>>& getInputs() const {
     return inputs;
   }
   unsigned getOutputOffset() const {
@@ -166,19 +176,19 @@ public:
   static const Kind kind = Not;
 
 private:
-  std::shared_ptr<BitExpr> expr;
+  Ref<BitExpr> expr;
 
 public:
-  NotBitExpr(std::shared_ptr<BitExpr> expr) : expr{expr} {}
+  NotBitExpr(Ref<BitExpr> expr) : expr{expr} {}
 
-  static std::shared_ptr<NotBitExpr> create(std::shared_ptr<BitExpr> expr) {
-    return std::make_shared<NotBitExpr>(expr);
+  static Ref<NotBitExpr> create(Ref<BitExpr> expr) {
+    return new NotBitExpr(expr);
   }
 
   Kind getKind() const override {
     return kind;
   }
-  std::shared_ptr<BitExpr> getExpr() const {
+  Ref<BitExpr> getExpr() const {
     return expr;
   }
 
@@ -188,35 +198,34 @@ public:
 class BinaryBitExpr : public BitExpr {
 private:
   Kind kind;
-  std::shared_ptr<BitExpr> left, right;
+  Ref<BitExpr> left, right;
 
 public:
-  BinaryBitExpr(Kind kind, std::shared_ptr<BitExpr> left,
-                std::shared_ptr<BitExpr> right)
+  BinaryBitExpr(Kind kind, Ref<BitExpr> left, Ref<BitExpr> right)
       : kind{kind}, left{left}, right{right} {
     assert(And <= kind && kind <= Xor && "invalid kind");
   }
 
-  static std::shared_ptr<BinaryBitExpr> create(Kind kind,
-                                               std::shared_ptr<BitExpr> left,
-                                               std::shared_ptr<BitExpr> right) {
-    return std::make_shared<BinaryBitExpr>(kind, left, right);
+  static Ref<BinaryBitExpr> create(Kind kind, Ref<BitExpr> left,
+                                   Ref<BitExpr> right) {
+    return new BinaryBitExpr(kind, left, right);
   }
 
   Kind getKind() const override {
     return kind;
   }
 
-  std::shared_ptr<BitExpr> getLeft() const {
+  Ref<BitExpr> getLeft() const {
     return left;
   }
-  std::shared_ptr<BitExpr> getRight() const {
+  Ref<BitExpr> getRight() const {
     return right;
   }
 
   void print(std::ostream& os) const override;
 };
 
-ANFPolynomial<std::shared_ptr<ReadBitExpr>> bitExprToANF(std::shared_ptr<BitExpr> expr, int read_depth = 0);
+ANFPolynomial<Ref<ReadBitExpr>> bitExprToANF(Ref<BitExpr> expr,
+                                             int read_depth = 0);
 
 }  // namespace bonc

@@ -12,7 +12,7 @@ std::vector<OutputInfo> FrontendResultParser::parseAll() {
     auto name = input.at("name").get<std::string>();
     auto size = input.at("size").get<std::size_t>();
     read_targets["input:" + name] =
-        std::make_shared<ReadTarget>(ReadTarget::Input, name, size);
+        new ReadTarget(ReadTarget::Input, name, size);
   }
 
   // Parse components.sboxes
@@ -22,14 +22,14 @@ std::vector<OutputInfo> FrontendResultParser::parseAll() {
     auto input_width = sbox.at("input_width").get<std::uint64_t>();
     auto output_width = sbox.at("output_width").get<std::uint64_t>();
     lookup_tables[name] =
-        std::make_shared<LookupTable>(name, input_width, output_width, value);
+        new LookupTable(name, input_width, output_width, value);
   }
 
   // Parse iterations
   for (const auto& iteration : value.at("iterations")) {
     auto name = iteration.at("name").get<std::string>();
     auto size = iteration.at("size").get<std::size_t>();
-    auto target = std::make_shared<ReadTarget>(ReadTarget::State, name, size);
+    Ref<ReadTarget> target = new ReadTarget(ReadTarget::State, name, size);
 
     if (iteration.contains("update_expressions")) {
       for (const auto& expr : iteration.at("update_expressions")) {
@@ -54,14 +54,14 @@ std::vector<OutputInfo> FrontendResultParser::parseAll() {
   return outputs;
 }
 
-std::shared_ptr<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,
-                                           const nlohmann::json& j) {
+Ref<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,
+                               const nlohmann::json& j) {
   const std::string type = j.at("type").get<std::string>();
 
   if (type == "constant") {
     // Parse constant_expression
     auto value = j.at("value").get<int>();
-    return std::make_shared<ConstantBitExpr>(value);
+    return new ConstantBitExpr(value);
   } else if (type == "read") {
     // Parse read_expression
     auto target_name = j.at("target_name").get<std::string>();
@@ -72,7 +72,7 @@ std::shared_ptr<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,
     // Parse lookup_expression
     auto table_name = j.at("table_name").get<std::string>();
     auto table = parser.getLookupTable(table_name);
-    std::vector<std::shared_ptr<BitExpr>> inputs;
+    std::vector<Ref<BitExpr>> inputs;
     for (const auto& input : j.at("inputs")) {
       inputs.push_back(fromJSON(parser, input));
     }
@@ -91,11 +91,11 @@ std::shared_ptr<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,
     auto left = fromJSON(parser, j.at("left"));
     auto right = fromJSON(parser, j.at("right"));
     if (op == "and") {
-      return std::make_shared<BinaryBitExpr>(BinaryBitExpr::And, left, right);
+      return new BinaryBitExpr(BinaryBitExpr::And, left, right);
     } else if (op == "or") {
-      return std::make_shared<BinaryBitExpr>(BinaryBitExpr::Or, left, right);
+      return new BinaryBitExpr(BinaryBitExpr::Or, left, right);
     } else if (op == "xor") {
-      return std::make_shared<BinaryBitExpr>(BinaryBitExpr::Xor, left, right);
+      return new BinaryBitExpr(BinaryBitExpr::Xor, left, right);
     }
   }
 
@@ -103,7 +103,7 @@ std::shared_ptr<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,
 }
 
 void ReadBitExpr::print(std::ostream& os) const {
-  os << target->getName() << "[" << offset << "]";
+  os << getTarget()->getName() << "[" << getOffset() << "]";
 }
 
 void LookupBitExpr::print(std::ostream& os) const {
@@ -135,29 +135,29 @@ void BinaryBitExpr::print(std::ostream& os) const {
   os << ")";
 }
 
-std::shared_ptr<ReadTarget> FrontendResultParser::getReadTarget(
+Ref<ReadTarget> FrontendResultParser::getReadTarget(
     const std::string& name) const {
   return read_targets.at(name);
 }
 
-std::shared_ptr<LookupTable> FrontendResultParser::getLookupTable(
+Ref<LookupTable> FrontendResultParser::getLookupTable(
     const std::string& name) const {
   return lookup_tables.at(name);
 }
 
-ANFPolynomial<std::shared_ptr<ReadBitExpr>> bitExprToANF(
-    std::shared_ptr<BitExpr> expr, int read_depth) {
+ANFPolynomial<Ref<ReadBitExpr>> bitExprToANF(Ref<BitExpr> expr,
+                                             int read_depth) {
   switch (expr->getKind()) {
     case BitExpr::Constant:
-      return ANFPolynomial<std::shared_ptr<ReadBitExpr>>(
-          std::static_pointer_cast<ConstantBitExpr>(expr)->getValue());
+      return ANFPolynomial<Ref<ReadBitExpr>>(
+          boost::static_pointer_cast<ConstantBitExpr>(expr)->getValue());
     case BitExpr::Read: {
       if (read_depth < 0) {
-        return ANFPolynomial<std::shared_ptr<ReadBitExpr>>::fromVariable(
-            std::static_pointer_cast<ReadBitExpr>(expr));
+        return ANFPolynomial<Ref<ReadBitExpr>>::fromVariable(
+            boost::static_pointer_cast<ReadBitExpr>(expr));
       }
       while (expr->getKind() == BitExpr::Read) {
-        auto read_expr = std::static_pointer_cast<ReadBitExpr>(expr);
+        auto read_expr = boost::static_pointer_cast<ReadBitExpr>(expr);
         auto read_target = read_expr->getTarget();
         auto offset = read_expr->getOffset();
         auto kind = read_target->getKind();
@@ -174,19 +174,19 @@ ANFPolynomial<std::shared_ptr<ReadBitExpr>> bitExprToANF(
       throw std::runtime_error("Lookup expr not implemented");
     case BitExpr::Not:
       return !bitExprToANF(
-          std::static_pointer_cast<NotBitExpr>(expr)->getExpr(), read_depth);
+          boost::static_pointer_cast<NotBitExpr>(expr)->getExpr(), read_depth);
     case BitExpr::And: {
-      auto binary_expr = std::static_pointer_cast<BinaryBitExpr>(expr);
+      auto binary_expr = boost::static_pointer_cast<BinaryBitExpr>(expr);
       return bitExprToANF(binary_expr->getLeft(), read_depth)
            * bitExprToANF(binary_expr->getRight(), read_depth);
     }
     case BitExpr::Xor: {
-      auto binary_expr = std::static_pointer_cast<BinaryBitExpr>(expr);
+      auto binary_expr = boost::static_pointer_cast<BinaryBitExpr>(expr);
       return bitExprToANF(binary_expr->getLeft(), read_depth)
            + bitExprToANF(binary_expr->getRight(), read_depth);
     }
     case BitExpr::Or: {
-      auto binary_expr = std::static_pointer_cast<BinaryBitExpr>(expr);
+      auto binary_expr = boost::static_pointer_cast<BinaryBitExpr>(expr);
       return !(!bitExprToANF(binary_expr->getLeft(), read_depth)
                * !bitExprToANF(binary_expr->getRight(), read_depth));
     }

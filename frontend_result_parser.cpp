@@ -2,8 +2,4 @@
 
 namespace bonc {
 
-static std::shared_ptr<BitExpr> fromJSON(const nlohmann::json &j) {
-  // TODO
-}
-
 }

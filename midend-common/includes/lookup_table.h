@@ -5,11 +5,13 @@
 #include <string>
 #include <memory>
 
+#include "ref.h"
+
 namespace bonc {
 
 class LookupTableImpl;
 
-class LookupTable {
+class LookupTable : public boost::intrusive_ref_counter<LookupTable> {
 private:
   std::unique_ptr<LookupTableImpl> impl;
 

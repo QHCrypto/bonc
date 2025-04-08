@@ -4,11 +4,13 @@
 #include <string>
 #include <vector>
 
+#include "ref.h"
+
 namespace bonc {
 
 class BitExpr;
 
-class ReadTarget {
+class ReadTarget : public boost::intrusive_ref_counter<ReadTarget> {
 public:
   enum Kind {
     Invalid = -1,
@@ -22,7 +24,7 @@ private:
   std::size_t size;
 
 public:
-  std::vector<std::shared_ptr<BitExpr>> update_expressions;
+  std::vector<Ref<BitExpr>> update_expressions;
 
   ReadTarget(Kind kind, std::string name, std::size_t size)
       : kind{kind}, name{std::move(name)} {}
