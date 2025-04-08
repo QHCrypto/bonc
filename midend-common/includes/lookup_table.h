@@ -2,28 +2,25 @@
 
 #include <cstdint>
 #include <vector>
+#include <string>
+#include <memory>
 
 namespace bonc {
 
+class LookupTableImpl;
+
 class LookupTable {
 private:
-  std::string name;
-  std::uint64_t input_width;
-  std::uint64_t output_width;
-  std::vector<std::uint64_t> values;
+  std::unique_ptr<LookupTableImpl> impl;
 
 public:
   LookupTable(const std::string& name, std::uint64_t input_width,
               std::uint64_t output_width,
-              const std::vector<std::uint64_t>& values)
-      : name(name),
-        input_width(input_width),
-        output_width(output_width),
-        values(values) {}
+              const std::vector<std::uint64_t>& values);
 
-  const std::string& getName() const {
-    return name;
-  }
+  const std::string& getName() const;
+
+  ~LookupTable();
 };
 
 }

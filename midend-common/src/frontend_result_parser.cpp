@@ -146,33 +146,49 @@ std::shared_ptr<LookupTable> FrontendResultParser::getLookupTable(
 }
 
 ANFPolynomial<std::shared_ptr<ReadBitExpr>> bitExprToANF(
-    std::shared_ptr<BitExpr> expr) {
+    std::shared_ptr<BitExpr> expr, int read_depth) {
   switch (expr->getKind()) {
     case BitExpr::Constant:
       return ANFPolynomial<std::shared_ptr<ReadBitExpr>>(
-          static_cast<ConstantBitExpr*>(expr.get())->getValue());
-    case BitExpr::Read:
-      return ANFPolynomial<std::shared_ptr<ReadBitExpr>>::fromVariable(
-          std::static_pointer_cast<ReadBitExpr>(expr));
+          std::static_pointer_cast<ConstantBitExpr>(expr)->getValue());
+    case BitExpr::Read: {
+      if (read_depth < 0) {
+        return ANFPolynomial<std::shared_ptr<ReadBitExpr>>::fromVariable(
+            std::static_pointer_cast<ReadBitExpr>(expr));
+      }
+      while (expr->getKind() == BitExpr::Read) {
+        auto read_expr = std::static_pointer_cast<ReadBitExpr>(expr);
+        auto read_target = read_expr->getTarget();
+        auto offset = read_expr->getOffset();
+        auto kind = read_target->getKind();
+        auto name = read_target->getName();
+        if (kind != ReadTarget::State) {
+          break;
+        }
+        expr = read_target->update_expressions.at(offset);
+      }
+      auto result = bitExprToANF(expr, read_depth - 1);
+      return result;
+    }
     case BitExpr::Lookup:
       throw std::runtime_error("Lookup expr not implemented");
     case BitExpr::Not:
       return !bitExprToANF(
-          std::static_pointer_cast<NotBitExpr>(expr)->getExpr());
+          std::static_pointer_cast<NotBitExpr>(expr)->getExpr(), read_depth);
     case BitExpr::And: {
       auto binary_expr = std::static_pointer_cast<BinaryBitExpr>(expr);
-      return bitExprToANF(binary_expr->getLeft())
-           * bitExprToANF(binary_expr->getRight());
+      return bitExprToANF(binary_expr->getLeft(), read_depth)
+           * bitExprToANF(binary_expr->getRight(), read_depth);
     }
     case BitExpr::Xor: {
       auto binary_expr = std::static_pointer_cast<BinaryBitExpr>(expr);
-      return bitExprToANF(binary_expr->getLeft())
-           + bitExprToANF(binary_expr->getRight());
+      return bitExprToANF(binary_expr->getLeft(), read_depth)
+           + bitExprToANF(binary_expr->getRight(), read_depth);
     }
     case BitExpr::Or: {
       auto binary_expr = std::static_pointer_cast<BinaryBitExpr>(expr);
-      return !(!bitExprToANF(binary_expr->getLeft())
-               * !bitExprToANF(binary_expr->getRight()));
+      return !(!bitExprToANF(binary_expr->getLeft(), read_depth)
+               * !bitExprToANF(binary_expr->getRight(), read_depth));
     }
     default: throw std::runtime_error("Unknown BitExpr kind");
   }

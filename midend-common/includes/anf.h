@@ -1,6 +1,7 @@
 #pragma once
 
 #include <unordered_set>
+#include <ostream>
 
 namespace bonc {
 
@@ -66,6 +67,15 @@ public:
     return result;
   }
 
+  template <typename U, typename F>
+  ANFMonomial<U> translate(F&& f) const {
+    ANFMonomial<U> result;
+    for (const auto& var : variables) {
+      result.variables.insert(ANFVariable<U>{f(var.data)});
+    }
+    return result;
+  }
+
   void print(std::ostream& os) const {
     for (auto it = variables.begin(); it != variables.end(); ++it) {
       if (it != variables.begin()) {
@@ -73,6 +83,17 @@ public:
       }
       it->print(os);
     }
+  }
+
+  auto begin() const {
+    return variables.begin();
+  }
+  auto end() const {
+    return variables.end();
+  }
+
+  std::size_t size() const {
+    return variables.size();
   }
 };
 
@@ -106,6 +127,16 @@ public:
     }
   }
 
+  template <typename U, typename F>
+  ANFPolynomial<U> translate(F&& f) const {
+    ANFPolynomial<U> result;
+    result.constant = constant;
+    for (const auto& mono : monomials) {
+      result.monomials.insert(mono.template translate<U>(f));
+    }
+    return result;
+  }
+
   void print(std::ostream& os) const {
     if (constant) {
       os << "1";
@@ -116,6 +147,13 @@ public:
       }
       it->print(os);
     }
+  }
+
+  auto begin() const {
+    return monomials.begin();
+  }
+  auto end() const {
+    return monomials.end();
   }
 
   friend ANFPolynomial<T> operator+(const ANFPolynomial<T>& lhs,

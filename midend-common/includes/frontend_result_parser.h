@@ -109,6 +109,17 @@ public:
   }
 
   void print(std::ostream& os) const override;
+
+  friend bool operator==(const ReadBitExpr& lhs, const ReadBitExpr& rhs) {
+    return lhs.target == rhs.target && lhs.offset == rhs.offset;
+  }
+
+  class Hash {
+  public:
+    std::size_t operator()(const ReadBitExpr& expr) const {
+      return std::hash<std::string>()(expr.target->getName()) ^ expr.offset;
+    }
+  };
 };
 
 class LookupBitExpr : public BitExpr {
@@ -206,6 +217,6 @@ public:
   void print(std::ostream& os) const override;
 };
 
-ANFPolynomial<std::shared_ptr<ReadBitExpr>> bitExprToANF(std::shared_ptr<BitExpr> expr);
+ANFPolynomial<std::shared_ptr<ReadBitExpr>> bitExprToANF(std::shared_ptr<BitExpr> expr, int read_depth = 0);
 
 }  // namespace bonc
