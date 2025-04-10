@@ -35,7 +35,7 @@ int numericMapping(bonc::ANFPolynomial<bonc::Ref<bonc::ReadBitExpr>> poly,
         var_deg = it->second;
       } else {
         auto anf =
-            bonc::bitExprToANF(read_target->update_expressions.at(offset), 2);
+            bonc::bitExprToANF(read_target->update_expressions.at(offset));
         var_deg = numericMapping(anf, expand_depth - 1);
         read_expr_degs[expr->getTargetAndOffset()] = var_deg;
       }
@@ -54,7 +54,7 @@ int main() {
   for (auto& info : parser.parseAll()) {
     std::cout << "Output: " << info.name << ", Size: " << info.size << "\n";
     for (auto& expr : info.expressions) {
-      output_polys.push_back(bitExprToANF(expr, 2));
+      output_polys.push_back(bitExprToANF(expr));
     }
   }
   auto one_poly = output_polys.at(31);

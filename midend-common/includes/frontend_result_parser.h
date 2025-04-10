@@ -92,8 +92,7 @@ struct ReadTargetAndOffset {
   friend bool operator==(const ReadTargetAndOffset& lhs,
                          const ReadTargetAndOffset& rhs) = default;
 
-  class Hash {
-  public:
+  struct Hash {
     std::size_t operator()(const ReadTargetAndOffset& obj) const {
       return boost::hash<Ref<ReadTarget>>{}(obj.target) ^ obj.offset;
     }

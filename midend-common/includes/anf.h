@@ -2,6 +2,7 @@
 
 #include <unordered_set>
 #include <ostream>
+#include <boost/functional/hash.hpp>
 
 namespace bonc {
 
@@ -46,13 +47,11 @@ public:
     return lhs.variables == rhs.variables;
   }
 
-  // See boost::hash_combine
   struct Hash {
     std::size_t operator()(const ANFMonomial<T>& mono) const {
       std::size_t seed = 0;
       for (const auto& var : mono.variables) {
-        seed ^= typename ANFVariable<T>::Hash{}(var) + 0x9e3779b9 + (seed << 6)
-              + (seed >> 2);
+        boost::hash_combine(seed, var.data);
       }
       return seed;
     }
