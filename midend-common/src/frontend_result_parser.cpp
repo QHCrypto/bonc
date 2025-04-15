@@ -102,10 +102,6 @@ Ref<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,
   throw std::invalid_argument("Unknown BitExpr type: " + type);
 }
 
-void ReadBitExpr::print(std::ostream& os) const {
-  os << getTarget()->getName() << "[" << getOffset() << "]";
-}
-
 void LookupBitExpr::print(std::ostream& os) const {
   os << table->getName() << "(";
   for (size_t i = 0; i < inputs.size(); ++i) {
@@ -145,16 +141,17 @@ Ref<LookupTable> FrontendResultParser::getLookupTable(
   return lookup_tables.at(name);
 }
 
-ANFPolynomial<Ref<ReadBitExpr>> bitExprToANF(Ref<BitExpr> expr,
-                                             int read_depth) {
+ANFPolynomial<ReadTargetAndOffset> bitExprToANF(Ref<BitExpr> expr,
+                                                int read_depth) {
   switch (expr->getKind()) {
     case BitExpr::Constant:
-      return ANFPolynomial<Ref<ReadBitExpr>>(
+      return ANFPolynomial<ReadTargetAndOffset>(
           boost::static_pointer_cast<ConstantBitExpr>(expr)->getValue());
     case BitExpr::Read: {
       if (read_depth < 0) {
-        return ANFPolynomial<Ref<ReadBitExpr>>::fromVariable(
-            boost::static_pointer_cast<ReadBitExpr>(expr));
+        return ANFPolynomial<ReadTargetAndOffset>::fromVariable(
+            boost::static_pointer_cast<ReadBitExpr>(expr)
+                ->getTargetAndOffset());
       }
       while (expr->getKind() == BitExpr::Read) {
         auto read_expr = boost::static_pointer_cast<ReadBitExpr>(expr);

@@ -5,6 +5,7 @@
 #include <iostream>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <tuple>
 
 #include "anf.h"
 #include "lookup_table.h"
@@ -92,11 +93,12 @@ struct ReadTargetAndOffset {
   friend bool operator==(const ReadTargetAndOffset& lhs,
                          const ReadTargetAndOffset& rhs) = default;
 
-  struct Hash {
-    std::size_t operator()(const ReadTargetAndOffset& obj) const {
-      return boost::hash<Ref<ReadTarget>>{}(obj.target) ^ obj.offset;
-    }
-  };
+  friend std::size_t hash_value(const ReadTargetAndOffset& rto) {
+    return boost::hash<bonc::Ref<bonc::ReadTarget>>{}(rto.target) ^ rto.offset;
+  }
+  void print(std::ostream& os) const {
+    os << target->getName() << "[" << offset << "]";
+  }
 };
 
 class ReadBitExpr : public BitExpr {
@@ -129,7 +131,9 @@ public:
     return kind;
   }
 
-  void print(std::ostream& os) const override;
+  void print(std::ostream& os) const override {
+    target_and_offset.print(os);
+  }
 };
 
 class LookupBitExpr : public BitExpr {
@@ -224,7 +228,28 @@ public:
   void print(std::ostream& os) const override;
 };
 
-ANFPolynomial<Ref<ReadBitExpr>> bitExprToANF(Ref<BitExpr> expr,
-                                             int read_depth = 0);
+ANFPolynomial<ReadTargetAndOffset> bitExprToANF(Ref<BitExpr> expr,
+                                                int read_depth = 0);
+
+// Get methods for tuple-like access
+template <std::size_t I>
+auto get(const ReadTargetAndOffset& rto) {
+  if constexpr (I == 0) {
+    return rto.target;
+  } else if constexpr (I == 1) {
+    return rto.offset;
+  } else {
+    static_assert(I < 2, "Index out of bounds for ReadTargetAndOffset");
+  }
+}
 
 }  // namespace bonc
+
+template <>
+struct std::tuple_size<bonc::ReadTargetAndOffset>
+    : std::integral_constant<size_t, 2> {};
+
+template <size_t I>
+struct std::tuple_element<I, bonc::ReadTargetAndOffset> {
+  using type = std::conditional_t<I == 0, bonc::Ref<bonc::ReadTarget>, unsigned>;
+};

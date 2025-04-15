@@ -1,8 +1,8 @@
 #pragma once
 
-#include <unordered_set>
-#include <ostream>
 #include <boost/functional/hash.hpp>
+#include <ostream>
+#include <unordered_set>
 
 namespace bonc {
 
@@ -22,7 +22,7 @@ public:
                          const ANFVariable<T>& rhs) = default;
 
   void print(std::ostream& os) const {
-    if constexpr (requires { data.print(os);}) {
+    if constexpr (requires { data.print(os); }) {
       data.print(os);
     } else if constexpr (requires { data->print(os); }) {
       data->print(os);
@@ -31,31 +31,17 @@ public:
     }
   }
 
-  struct Hash {
-    std::size_t operator()(const ANFVariable<T>& var) const {
-      return std::hash<T>()(var.data);
-    }
-  };
+  friend std::size_t hash_value(const ANFVariable<T>& var) {
+    return std::hash<T>()(var.data);
+  }
 };
 
 template <typename T>
 class ANFMonomial {
 public:
-  std::unordered_set<ANFVariable<T>, typename ANFVariable<T>::Hash> variables;
+  std::unordered_set<ANFVariable<T>> variables;
 
-  bool friend operator==(const ANFMonomial<T>& lhs, const ANFMonomial<T>& rhs) {
-    return lhs.variables == rhs.variables;
-  }
-
-  struct Hash {
-    std::size_t operator()(const ANFMonomial<T>& mono) const {
-      std::size_t seed = 0;
-      for (const auto& var : mono.variables) {
-        boost::hash_combine(seed, var.data);
-      }
-      return seed;
-    }
-  };
+  bool friend operator==(const ANFMonomial<T>& lhs, const ANFMonomial<T>& rhs) = default;
 
   friend ANFMonomial<T> operator*(const ANFMonomial<T>& lhs,
                                   const ANFMonomial<T>& rhs) {
@@ -66,11 +52,11 @@ public:
     return result;
   }
 
-  template <typename U, typename F>
+  template <typename U, std::invocable<const T&, const ANFMonomial<T>&> F>
   ANFMonomial<U> translate(F&& f) const {
     ANFMonomial<U> result;
     for (const auto& var : variables) {
-      result.variables.insert(ANFVariable<U>{f(var.data)});
+      result.variables.insert(ANFVariable<U>{f(var.data, *this)});
     }
     return result;
   }
@@ -94,13 +80,23 @@ public:
   std::size_t size() const {
     return variables.size();
   }
+
+  friend std::size_t hash_value(const ANFMonomial<T>& mono) {
+    std::size_t seed = 0;
+    for (const auto& var : mono.variables) {
+      boost::hash_combine(seed, var.data);
+    }
+    return seed;
+  }
 };
 
 template <typename T>
 class ANFPolynomial {
 public:
-  std::unordered_set<ANFMonomial<T>, typename ANFMonomial<T>::Hash> monomials;
+  std::unordered_set<ANFMonomial<T>> monomials;
   bool constant{};
+
+  bool friend operator==(const ANFPolynomial<T>& lhs, const ANFPolynomial<T>& rhs) = default;
 
   explicit ANFPolynomial(bool constant = false) : constant(constant) {}
 
@@ -126,8 +122,9 @@ public:
     }
   }
 
-  template <typename U, typename F>
-  ANFPolynomial<U> translate(F&& f) const {
+  template <std::invocable<const T&, const ANFMonomial<T>&> F>
+  auto translate(F&& f) const {
+    using U = decltype(f(std::declval<T>(), std::declval<ANFMonomial<T>>()));
     ANFPolynomial<U> result;
     result.constant = constant;
     for (const auto& mono : monomials) {
@@ -205,6 +202,38 @@ public:
     result.constant = !result.constant;
     return result;
   }
+
+  friend std::size_t hash_value(const ANFPolynomial& poly) {
+    std::size_t seed = 0;
+    for (const auto& var : poly.monomials) {
+      boost::hash_combine(seed, var);
+    }
+    boost::hash_combine(seed, poly.constant);
+    return seed;
+  }
 };
 
+template <typename T>
+ANFPolynomial<T> expandANF(const ANFPolynomial<ANFPolynomial<T>>& poly) {
+  ANFPolynomial<T> result;
+  for (const auto& mono : poly.monomials) {
+    ANFPolynomial<T> expandedMono(true);
+    for (const auto& varPoly : mono) {
+      expandedMono = expandedMono * varPoly.data;
+    }
+    result = result + expandedMono;
+  }
+  return result;
+}
+
 }  // namespace bonc
+
+template <typename T>
+  requires requires(const T& object) {
+    { hash_value(object) } -> std::convertible_to<std::size_t>;
+  }
+struct std::hash<T> {
+  std::size_t operator()(const T& var) const {
+    return hash_value(var);
+  }
+};
