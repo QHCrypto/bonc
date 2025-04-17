@@ -9,8 +9,21 @@ using Polynomial = bonc::ANFPolynomial<bonc::ReadTargetAndOffset>;
 std::unordered_map<bonc::ReadTargetAndOffset, int> read_expr_degs;
 
 std::unordered_map<Monomial, bonc::ReadTargetAndOffset> monomial_better_bound;
+std::unordered_set<bonc::ReadTargetAndOffset> suppressed_read;
 
-int bitExprDegree(bonc::ReadTargetAndOffset rto);
+// read ANFPolynomial from a ReadTargetAndOffset.
+// Record that this RTO might have a better degree bound than its monomial.
+Polynomial readState(bonc::ReadTargetAndOffset rto) {
+  auto poly = bitExprToANF(rto.target->update_expressions.at(rto.offset));
+  for (auto& monomial : poly) {
+    if (monomial.size() > 1) {
+      monomial_better_bound.insert_or_assign(monomial, rto);
+    }
+  }
+  return poly;
+}
+
+int variableDegree(bonc::ReadTargetAndOffset rto);
 
 auto numericMappingSubstitute = [](const bonc::ReadTargetAndOffset& rto,
                                    const Monomial& mono) -> Polynomial {
@@ -23,13 +36,7 @@ auto numericMappingSubstitute = [](const bonc::ReadTargetAndOffset& rto,
   if (kind == bonc::ReadTarget::Input) {
     return Polynomial::fromVariable(rto);
   } else {
-    auto poly = bonc::bitExprToANF(read_target->update_expressions.at(offset));
-    for (auto& monomial : poly) {
-      if (monomial.size() > 1) {
-        monomial_better_bound.insert_or_assign(monomial, rto);
-      }
-    }
-    return poly;
+    return readState(rto);
   }
 };
 
@@ -41,60 +48,115 @@ std::generator<std::vector<Monomial>> monomialPartition(const Monomial& mono) {
   auto impl = [&](this auto&& self, IterType i, std::vector<Monomial>& current)
       -> std::generator<std::vector<Monomial>> {
     if (i == end) {
-      // 所有元素都已分配，添加当前划分到结果
       co_yield current;
       co_return;
     }
-
-    // 尝试将元素 *i 添加到每个现有块中
-    for (size_t j = 0; j < current.size(); j++) {
-      auto [it, _] = current[j].variables.insert(*i);
-      co_yield std::ranges::elements_of(self(std::ranges::next(i), current));
-      current[j].variables.erase(it);  // 回溯
-    }
-
-    // 尝试为元素 *i 创建一个新块
+    // 将此变量作为一个独立的划分……
     current.push_back(Monomial{.variables = {*i}});
     co_yield std::ranges::elements_of(self(std::ranges::next(i), current));
-    current.pop_back();  // 回溯
+    current.pop_back();
+
+    // ……或者添加到之前的划分
+    for (auto& part : current) {
+      auto [it, _] = part.variables.insert(*i);
+      co_yield std::ranges::elements_of(self(std::ranges::next(i), current));
+      part.variables.erase(it);
+    }
   };
   std::vector<Monomial> current;
+  // 保证 current 迭代器不失效
+  current.reserve(mono.size());
   co_yield std::ranges::elements_of(impl(mono.begin(), current));
 }
 
-int monomialDeg(const Monomial& monomial) {
-  int result = 0;
-  static bool test = true;
-  if (monomial.size() == 3 && test) {
-    test = false;
+constexpr const bool ENABLE_MONOMIAL_OPTIMIZATION = true;
+
+int monomialDegree(const Monomial& monomial) {
+  bool apply_optimization = ENABLE_MONOMIAL_OPTIMIZATION && monomial.size() > 1
+                         && monomial.size() <= 6;
+  if (apply_optimization) {
+    int result = std::numeric_limits<int>::max();
+    std::cout << "=====\n";
+    monomial.print(std::cout);
+    std::cout << "\n";
     for (auto partition : monomialPartition(monomial)) {
       std::cout << "{ ";
       for (const auto& mono : partition) {
         std::cout << "{ ";
-        for (auto elem : mono.variables) {
-          elem.print(std::cout);
-        }
+        mono.print(std::cout);
         std::cout << "} ";
       }
-      std::cout << "}\n";
+      std::cout << "}";
+      int deg = 0;
+      for (const auto& mono : partition) {
+        if (mono.size() == 1) {
+          deg += variableDegree(mono.variables.begin()->data);
+          continue;
+        }
+        auto it = monomial_better_bound.find(mono);
+        if (it == monomial_better_bound.end()) {
+          std::cout << " (";
+          mono.print(std::cout);
+          std::cout << ") not found\n";
+          goto next_partition;
+        }
+        if (suppressed_read.contains(it->second)) {
+          std::cout << "(";
+          mono.print(std::cout);
+          std::cout << ") suppressed\n";
+          goto next_partition;
+        }
+        deg += variableDegree(it->second);
+      }
+      std::cout << " deg: " << deg << '\n';
+      result = std::min(result, deg);
+    next_partition:;
     }
+    std::cout << "result: " << result << '\n';
+    return result;
+  } else {
+    int result = 0;
+    for (auto rto : monomial) {
+      result += variableDegree(rto.data);
+    }
+    return result;
   }
-  for (auto rto : monomial) {
-    result += bitExprDegree(rto.data);
-  }
-  return result;
 }
 
 int numericMapping(const Polynomial& poly) {
   int poly_deg = 0;
   for (auto& monomial : poly) {
-    poly_deg = std::max(poly_deg, monomialDeg(monomial));
+    poly_deg = std::max(poly_deg, monomialDegree(monomial));
   }
+  // std::cout << "AAAAA ";
+  // poly.print(std::cout);
+  // std::cout << ' ' << poly_deg << '\n';
   return poly_deg;
 };
 
-int bitExprDegree(bonc::ReadTargetAndOffset rto) {
+struct Defer {
+  std::function<void()> func;
+  ~Defer() {
+    func();
+  }
+};
+struct DeferHelper {
+  template <typename F>
+  Defer operator+(F&& f) {
+    return Defer{std::forward<F>(f)};
+  }
+};
+#define defer auto _defer_helper##__LINE__ = DeferHelper() + [&]()
+
+int variableDegree(bonc::ReadTargetAndOffset rto) {
   auto [read_target, offset] = rto;
+  auto [it, suc] = suppressed_read.insert(rto);
+  defer {
+    if (suc) {
+      suppressed_read.erase(it);
+    }
+  };
+
   auto kind = read_target->getKind();
   auto name = read_target->getName();
   if (kind == bonc::ReadTarget::Input) {
@@ -108,9 +170,9 @@ int bitExprDegree(bonc::ReadTargetAndOffset rto) {
     if (it != read_expr_degs.end()) {
       return it->second;
     } else {
-      auto anf = bonc::bitExprToANF(read_target->update_expressions.at(offset));
-      auto result = numericMapping(
-          bonc::expandANF(anf.translate(numericMappingSubstitute)));
+      auto anf = readState(rto);
+      anf = expandANF(anf.translate(numericMappingSubstitute));
+      auto result = numericMapping(anf);
       read_expr_degs[rto] = result;
       return result;
     }
@@ -118,6 +180,7 @@ int bitExprDegree(bonc::ReadTargetAndOffset rto) {
 }
 
 int main() {
+  suppressed_read.reserve(1024);
   std::ifstream ifs("bonc.json");
   bonc::FrontendResultParser parser(ifs);
 
@@ -128,10 +191,11 @@ int main() {
       output_polys.push_back(bitExprToANF(expr));
     }
   }
-  auto one_poly = output_polys.at(31);
+  for (int i = 1151; i >= 1152 - 1000; i--) {
+    auto one_poly = output_polys.at(i);
 
-  auto one_poly_expanded =
-      bonc::expandANF(one_poly.translate(numericMappingSubstitute));
-  std::cout << numericMapping(one_poly_expanded) << '\n';
-  std::cout << monomial_better_bound.size() << '\n';
+    one_poly = bonc::expandANF(one_poly.translate(numericMappingSubstitute));
+    // one_poly = bonc::expandANF(one_poly.translate(numericMappingSubstitute));
+    std::cerr << (1152 - i - 1) << ':' << numericMapping(one_poly) << '\n';
+  }
 }

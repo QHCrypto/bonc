@@ -84,7 +84,7 @@ public:
   friend std::size_t hash_value(const ANFMonomial<T>& mono) {
     std::size_t seed = 0;
     for (const auto& var : mono.variables) {
-      boost::hash_combine(seed, var.data);
+      seed ^= hash_value(var);
     }
     return seed;
   }

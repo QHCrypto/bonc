@@ -148,24 +148,27 @@ ANFPolynomial<ReadTargetAndOffset> bitExprToANF(Ref<BitExpr> expr,
       return ANFPolynomial<ReadTargetAndOffset>(
           boost::static_pointer_cast<ConstantBitExpr>(expr)->getValue());
     case BitExpr::Read: {
-      if (read_depth < 0) {
-        return ANFPolynomial<ReadTargetAndOffset>::fromVariable(
-            boost::static_pointer_cast<ReadBitExpr>(expr)
-                ->getTargetAndOffset());
-      }
-      while (expr->getKind() == BitExpr::Read) {
+      while (true) {
         auto read_expr = boost::static_pointer_cast<ReadBitExpr>(expr);
         auto read_target = read_expr->getTarget();
         auto offset = read_expr->getOffset();
         auto kind = read_target->getKind();
         auto name = read_target->getName();
         if (kind != ReadTarget::State) {
-          break;
+          return ANFPolynomial<ReadTargetAndOffset>::fromVariable(
+              read_expr->getTargetAndOffset());
         }
-        expr = read_target->update_expressions.at(offset);
+        auto expanded_expr = read_target->update_expressions.at(offset);
+        if (expanded_expr->getKind() != BitExpr::Read) {
+          if (read_depth > 0) {
+            return bitExprToANF(expanded_expr, read_depth - 1);
+          } else {
+            return ANFPolynomial<ReadTargetAndOffset>::fromVariable(
+                read_expr->getTargetAndOffset());
+          }
+        }
+        expr = expanded_expr;
       }
-      auto result = bitExprToANF(expr, read_depth - 1);
-      return result;
     }
     case BitExpr::Lookup:
       throw std::runtime_error("Lookup expr not implemented");
