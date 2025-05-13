@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <boost/dynamic_bitset.hpp>
 
 #include "ref.h"
 
@@ -21,6 +22,8 @@ public:
               const std::vector<std::uint64_t>& values);
 
   const std::string& getName() const;
+
+  boost::dynamic_bitset<> getANFRepresentation(std::uint64_t index) const;
 
   ~LookupTable();
 };

@@ -197,6 +197,15 @@ public:
     return result;
   }
 
+  ANFPolynomial<T>& operator+=(const ANFPolynomial<T>& rhs) {
+    *this = *this + rhs;
+    return *this;
+  }
+  ANFPolynomial<T>& operator*=(const ANFPolynomial<T>& rhs) {
+    *this = *this * rhs;
+    return *this;
+  }
+
   ANFPolynomial<T> operator!() const {
     ANFPolynomial<T> result = *this;
     result.constant = !result.constant;

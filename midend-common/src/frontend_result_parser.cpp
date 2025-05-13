@@ -170,8 +170,22 @@ ANFPolynomial<ReadTargetAndOffset> bitExprToANF(Ref<BitExpr> expr,
         expr = expanded_expr;
       }
     }
-    case BitExpr::Lookup:
-      throw std::runtime_error("Lookup expr not implemented");
+    case BitExpr::Lookup: {
+      auto lookup_expr =
+          boost::static_pointer_cast<LookupBitExpr>(expr);
+      auto table = lookup_expr->getTable();
+      auto inputs = lookup_expr->getInputs();
+      auto output_offset = lookup_expr->getOutputOffset();
+      auto anf_rep = table->getANFRepresentation(output_offset);
+      auto result = ANFPolynomial<ReadTargetAndOffset>::fromConstant(false);
+      for (std::size_t i = 0; i < inputs.size(); i++) {
+        if (anf_rep.test(i)) {
+          auto input_anf = bitExprToANF(inputs[i], read_depth);
+          result += input_anf;
+        }
+      }
+      return result;
+    }
     case BitExpr::Not:
       return !bitExprToANF(
           boost::static_pointer_cast<NotBitExpr>(expr)->getExpr(), read_depth);

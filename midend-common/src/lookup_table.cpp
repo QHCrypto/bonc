@@ -54,6 +54,10 @@ const std::string& LookupTable::getName() const {
   return impl->name;
 }
 
+boost::dynamic_bitset<> LookupTable::getANFRepresentation(std::uint64_t index) const {
+  return impl->anf_bits.at(index);
+}
+
 LookupTable::~LookupTable() = default;
 
 }  // namespace bonc
