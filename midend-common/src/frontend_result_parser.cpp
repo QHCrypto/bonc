@@ -22,7 +22,7 @@ std::vector<OutputInfo> FrontendResultParser::parseAll() {
     auto input_width = sbox.at("input_width").get<std::uint64_t>();
     auto output_width = sbox.at("output_width").get<std::uint64_t>();
     lookup_tables[name] =
-        new LookupTable(name, input_width, output_width, value);
+        LookupTable::create(name, input_width, output_width, value);
   }
 
   // Parse iterations
@@ -171,8 +171,7 @@ ANFPolynomial<ReadTargetAndOffset> bitExprToANF(Ref<BitExpr> expr,
       }
     }
     case BitExpr::Lookup: {
-      auto lookup_expr =
-          boost::static_pointer_cast<LookupBitExpr>(expr);
+      auto lookup_expr = boost::static_pointer_cast<LookupBitExpr>(expr);
       auto table = lookup_expr->getTable();
       auto inputs = lookup_expr->getInputs();
       auto output_offset = lookup_expr->getOutputOffset();

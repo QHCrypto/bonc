@@ -1,273 +1,330 @@
-#include <anf.h>
 #include <frontend_result_parser.h>
 
+#include <boost/process.hpp>
 #include <fstream>
 
-struct Defer {
-  std::function<void()> func;
-  Defer(std::function<void()> func) : func{std::move(func)} {}
-  Defer(const Defer&) = delete;
-  Defer(Defer&& other) {
-    func = std::move(other.func);
-    other.func = nullptr;
-  };
-  Defer& operator=(const Defer&) = delete;
-  Defer& operator=(Defer&& other) {
-    if (this != &other) {
-      func = std::move(other.func);
-      other.func = nullptr;
-    }
-    return *this;
-  }
-  ~Defer() {
-    if (func) {
-      func();
-    }
-  }
+struct ModelVariable;
+
+struct SATLiteral {
+  const ModelVariable* variable;
+  bool negated;
+
+  friend bool operator==(const SATLiteral& lhs,
+                         const SATLiteral& rhs) = default;
 };
-struct DeferHelper {
-  template <typename F>
-  Defer operator+(F&& f) {
-    return Defer{std::forward<F>(f)};
+
+struct ModelVariable {
+  const std::string name;
+
+  SATLiteral pos() const {
+    return {this, false};
   }
-};
-#define defer auto _defer_helper##__LINE__ = DeferHelper() + [&]()
-
-using Monomial = bonc::ANFMonomial<bonc::ReadTargetAndOffset>;
-using Polynomial = bonc::ANFPolynomial<bonc::ReadTargetAndOffset>;
-
-std::unordered_map<bonc::ReadTargetAndOffset, int> read_expr_degs;
-
-std::unordered_map<Monomial, bonc::ReadTargetAndOffset> monomial_better_bound;
-std::unordered_set<bonc::ReadTargetAndOffset> suppressed_read;
-
-// read ANFPolynomial from a ReadTargetAndOffset.
-// Record that this RTO might have a better degree bound than its monomial.
-Polynomial readState(bonc::ReadTargetAndOffset rto) {
-  auto poly = bitExprToANF(rto.target->update_expressions.at(rto.offset));
-  for (auto& monomial : poly) {
-    if (monomial.size() > 1) {
-      monomial_better_bound.insert_or_assign(monomial, rto);
-    }
-  }
-  return poly;
-}
-
-int variableDegree(bonc::ReadTargetAndOffset rto);
-
-auto numericMappingSubstitute = [](const bonc::ReadTargetAndOffset& rto,
-                                   const Monomial& mono) -> Polynomial {
-  if (mono.size() < 2) {
-    return Polynomial::fromVariable(rto);
-  }
-  auto [read_target, offset] = rto;
-  auto kind = read_target->getKind();
-  auto name = read_target->getName();
-  if (kind == bonc::ReadTarget::Input) {
-    return Polynomial::fromVariable(rto);
-  } else {
-    return readState(rto);
+  SATLiteral neg() const {
+    return {this, true};
   }
 };
 
-#include <generator>
+struct SATClause {
+  std::vector<SATLiteral> literals;
 
-std::generator<std::vector<Monomial>> monomialPartition(const Monomial& mono) {
-  const auto end = mono.end();
-  using IterType = decltype(mono.begin());
-  auto impl = [&](this auto&& self, IterType i, std::vector<Monomial>& current)
-      -> std::generator<std::vector<Monomial>> {
-    if (i == end) {
-      co_yield current;
-      co_return;
-    }
-    // 将此变量作为一个独立的划分……
-    current.push_back(Monomial{.variables = {*i}});
-    co_yield std::ranges::elements_of(self(std::ranges::next(i), current));
-    current.pop_back();
+  SATClause() = default;
+  SATClause(std::initializer_list<SATLiteral> lits) : literals(lits) {}
 
-    // ……或者添加到之前的划分
-    for (auto& part : current) {
-      auto [it, _] = part.variables.insert(*i);
-      co_yield std::ranges::elements_of(self(std::ranges::next(i), current));
-      part.variables.erase(it);
-    }
-  };
-  std::vector<Monomial> current;
-  // 保证 current 迭代器不失效
-  current.reserve(mono.size());
-  co_yield std::ranges::elements_of(impl(mono.begin(), current));
-}
+  auto begin(this auto&& self) {
+    return self.literals.begin();
+  }
+  auto end(this auto&& self) {
+    return self.literals.end();
+  }
 
-constexpr const bool ENABLE_MONOMIAL_OPTIMIZATION = true;
+  void push_back(const SATLiteral& literal) {
+    literals.push_back(literal);
+  }
+  void push_back(SATLiteral&& literal) {
+    literals.push_back(std::move(literal));
+  }
+};
 
-using namespace std::literals;
+class TableSATTemplate {
+public:
+  enum Entry { Positive, Negative, NotTaken };
 
-static std::vector<std::string> debugLinePrefix{""s};
-[[gnu::always_inline]] inline auto pushDebugLinePrefix(const std::string& str = "| ") {
-  debugLinePrefix.push_back(debugLinePrefix.back() + str);
-  return Defer{[&] { debugLinePrefix.pop_back(); }};
-}
+private:
+  std::vector<std::vector<Entry>> clauses;
 
-[[gnu::always_inline]] inline std::ostream& printDebugNewline() {
-  return std::cout << '\n' << debugLinePrefix.back();
-}
-
-int monomialDegree(const Monomial& monomial) {
-  auto debug_scope = pushDebugLinePrefix();
-  bool apply_optimization = ENABLE_MONOMIAL_OPTIMIZATION && monomial.size() > 1
-                         && monomial.size() <= 6;
-  printDebugNewline() << "BEGIN EMN ";
-  monomial.print(std::cout);
-  if (apply_optimization) {
-    int result = std::numeric_limits<int>::max();
-    printDebugNewline() << "Finding optimization";
-    {
-      auto debug_scope = pushDebugLinePrefix();
-      for (auto partition : monomialPartition(monomial)) {
-        printDebugNewline() << "BEGIN OPT { ";
-        for (const auto& mono : partition) {
-          mono.print(std::cout);
-          std::cout << ", ";
+public:
+  static TableSATTemplate fromEspressoOutput(std::istream& espresso_output) {
+    TableSATTemplate template_;
+    std::string line;
+    while (std::getline(espresso_output, line)) {
+      if (line.empty() || line[0] == '.') {
+        continue;  // Skip empty lines and comments
+      }
+      std::vector<Entry> clause;
+      for (char c : line) {
+        if (c == '1') {
+          clause.push_back(Entry::Negative);
+        } else if (c == '0') {
+          clause.push_back(Entry::Positive);
+        } else if (c == '-') {
+          clause.push_back(Entry::NotTaken);
+        } else {
+          break;
         }
-        std::cout << "}";
-        int deg = 0;
-        for (const auto& mono : partition) {
-          if (mono.size() == 1) {
-            deg += variableDegree(mono.variables.begin()->data);
-            continue;
-          }
-          auto it = monomial_better_bound.find(mono);
-          if (it == monomial_better_bound.end()) {
-            printDebugNewline() << "END   OPT { ";
-            for (const auto& mono : partition) {
-              mono.print(std::cout);
-              std::cout << ", ";
-            }
-            std::cout << "} (";
-            mono.print(std::cout);
-            std::cout << ") not found";
-            goto next_partition;
-          }
-          if (suppressed_read.contains(it->second)) {
-            printDebugNewline() << "END   OPT { ";
-            for (const auto& mono : partition) {
-              mono.print(std::cout);
-              std::cout << ", ";
-            }
-            std::cout << "} (";
-            mono.print(std::cout);
-            std::cout << ") suppressed";
-            goto next_partition;
-          }
-          deg += variableDegree(it->second);
-        }
-        printDebugNewline() << "END   OPT { ";
-        for (const auto& mono : partition) {
-          mono.print(std::cout);
-          std::cout << ", ";
-        }
-        std::cout << "} deg: " << deg;
-        result = std::min(result, deg);
-      next_partition:;
+      }
+      if (!clause.empty()) {
+        template_.clauses.push_back(std::move(clause));
       }
     }
-    printDebugNewline() << "END   EMN ";
-    monomial.print(std::cout);
-    std::cout << " as " << result;
-    return result;
-  } else {
-    int result = 0;
-    for (auto rto : monomial) {
-      int varDeg = variableDegree(rto.data);
-      result += varDeg;
-    }
-    printDebugNewline() << "END   EMN ";
-    monomial.print(std::cout);
-    std::cout << " as " << result;
-    return result;
+    return template_;
   }
-}
 
-int numericMapping(const Polynomial& poly) {
-  auto debug_scope = pushDebugLinePrefix();
-  printDebugNewline() << "BEGIN EPL ";
-  poly.print(std::cout);
-  int poly_deg = poly.constant ? 0 : std::numeric_limits<int>::min();
-  for (auto& monomial : poly) {
-    poly_deg = std::max(poly_deg, monomialDegree(monomial));
+  void print(std::ostream& os) const {
+    for (const auto& clause : clauses) {
+      for (const auto& entry : clause) {
+        switch (entry) {
+          case Entry::Positive: os << "1 "; break;
+          case Entry::Negative: os << "0 "; break;
+          case Entry::NotTaken: os << "- "; break;
+        }
+      }
+      os << "\n";
+    }
   }
-  printDebugNewline() << "END   EPL ";
-  poly.print(std::cout);
-  std::cout << " as " << poly_deg;
-  return poly_deg;
+
+  auto begin(this auto&& self) {
+    return self.clauses.begin();
+  }
+  auto end(this auto&& self) {
+    return self.clauses.end();
+  }
 };
 
-int variableDegree(bonc::ReadTargetAndOffset rto) {
-  auto debug_scope = pushDebugLinePrefix();
-  auto [read_target, offset] = rto;
-  auto [it, suc] = suppressed_read.insert(rto);
-  defer {
-    if (suc) {
-      suppressed_read.erase(it);
-    }
-  };
-  printDebugNewline() << "BEGIN EVR ";
-  rto.print(std::cout);
+class SBoxInputBlock {
+  std::vector<bonc::Ref<bonc::BitExpr>> inputs;
+  bonc::Ref<bonc::LookupTable> table;
 
-  auto kind = read_target->getKind();
-  auto name = read_target->getName();
-  if (kind == bonc::ReadTarget::Input) {
-    printDebugNewline() << "END   EVR ";
-    rto.print(std::cout);
-    std::cout << " as input";
-    if (name == "iv") {
-      return 1;
-    } else {
-      return 0;
+public:
+  friend bool operator==(const SBoxInputBlock& lhs,
+                         const SBoxInputBlock& rhs) = default;
+
+  friend std::size_t hash_value(const SBoxInputBlock& block) {
+    std::size_t seed = 0;
+    for (const auto& input : block.inputs) {
+      boost::hash_combine(seed, input);
     }
-  } else {
-    auto it = read_expr_degs.find(rto);
-    if (it != read_expr_degs.end()) {
-      printDebugNewline() << "END   EVR ";
-      rto.print(std::cout);
-      std::cout << " as previously founded " << it->second;
-      return it->second;
-    } else {
-      auto anf = readState(rto);
-      anf = expandANF(anf.translate(numericMappingSubstitute));
-      printDebugNewline() << "expand ANF to ";
-      anf.print(std::cout);
-      auto result = numericMapping(anf);
-      read_expr_degs[rto] = result;
-      printDebugNewline() << "END   EVR ";
-      rto.print(std::cout);
-      std::cout << " as " << result;
-      return result;
-    }
+    boost::hash_combine(seed, block.table);
+    return seed;
   }
-}
+
+  SBoxInputBlock(std::vector<bonc::Ref<bonc::BitExpr>> inputs,
+                 bonc::Ref<bonc::LookupTable> table)
+      : inputs(std::move(inputs)), table(std::move(table)) {}
+};
+
+class DifferentialSATModel {
+  std::unordered_set<std::unique_ptr<ModelVariable>> variables;
+
+  using Var = const ModelVariable*;
+  Var TRUE;
+  Var FALSE;
+
+  std::vector<SATClause> constraints;
+
+  std::unordered_map<const bonc::LookupTable*,
+                     std::unique_ptr<TableSATTemplate>>
+      tableTemplates;
+  std::unordered_map<SBoxInputBlock, std::vector<Var>> modelledSboxInputs;
+
+  const TableSATTemplate* buildTableTemplate(const bonc::LookupTable* lookup) {
+    assert(lookup);
+    if (auto it = tableTemplates.find(lookup); it != tableTemplates.end()) {
+      return it->second.get();
+    }
+    auto& table = lookup->getDDT();
+    assert(table.size() > 1 && table.at(0).size() > 1);
+    auto input_width = std::bit_width(table.size() - 1);
+    auto output_width = std::bit_width(table.at(0).size() - 1);
+    auto get_weight = [output_width](std::uint64_t x) {
+      return output_width - int(std::log2(x));
+    };
+    std::string espresso_input;
+    espresso_input +=
+        std::format(".i {}\n.o 1\n", input_width + 2 * output_width);
+    for (auto i = 0uz; i < table.size(); i++) {
+      const auto& row = table.at(i);
+      for (auto j = 0uz; j < row.size(); j++) {
+        auto val = row.at(j);
+        if (val) {
+          std::string input_bitvec = std::format("{:0{}b}", i, input_width);
+          std::string output_bitvec = std::format("{:0{}b}", j, output_width);
+          auto weight = get_weight(val);
+          std::string weight_vec = std::format(
+              "{:0>{}}{:1>{}}", "", output_width - weight, "", weight);
+          espresso_input += std::format("{}{}{} 1\n", input_bitvec,
+                                        output_bitvec, weight_vec);
+        }
+      }
+    }
+    espresso_input += ".e\n";
+    boost::process::opstream proc_input;
+    boost::process::ipstream proc_output;
+    boost::process::child c(
+        "/home/guyutongxue/Downloads/espresso-logic/bin/espresso", "-epos",
+        boost::process::std_in<proc_input, boost::process::std_out>
+            proc_output);
+    proc_input << espresso_input;
+    proc_input.close();
+    c.wait();
+    auto template_ = TableSATTemplate::fromEspressoOutput(proc_output);
+    template_.print(std::cout);
+    auto ptr = std::make_unique<TableSATTemplate>(std::move(template_));
+    const auto* ptr_raw = ptr.get();
+    tableTemplates[lookup] = std::move(ptr);
+    return ptr_raw;
+  }
+
+  bonc::Ref<bonc::LookupTable> AND_TABLE;
+  bonc::Ref<bonc::LookupTable> OR_TABLE;
+
+public:
+  DifferentialSATModel() {
+    TRUE = createVariable("TRUE");
+    FALSE = createVariable("FALSE");
+    constraints.push_back(SATClause{TRUE->pos()});
+    constraints.push_back(SATClause{FALSE->neg()});
+
+    AND_TABLE = bonc::LookupTable::create("AND", 2, 1, {0, 0, 0, 1});
+    OR_TABLE = bonc::LookupTable::create("OR", 2, 1, {0, 1, 1, 1});
+  }
+
+  Var createVariable(const std::string& name) {
+    auto var = new ModelVariable{name};
+    variables.insert(std::unique_ptr<ModelVariable>(var));
+    return var;
+  }
+
+  std::vector<std::vector<Var>> weightVariables;
+  std::vector<Var> createWeightVariables(const std::string& name,
+                                         std::size_t size) {
+    std::vector<Var> vars;
+    vars.reserve(size);
+    for (std::size_t i = 0; i < size; i++) {
+      vars.push_back(createVariable(name + "_" + std::to_string(i)));
+    }
+    weightVariables.push_back(std::move(vars));
+    return weightVariables.back();
+  }
+
+  Var generate(bonc::Ref<bonc::BitExpr> expr) {
+    // TODO cache
+    switch (expr->getKind()) {
+      case bonc::BitExpr::Constant: {
+        return TRUE;
+      }
+      case bonc::BitExpr::Read: {
+        auto read_expr = boost::static_pointer_cast<bonc::ReadBitExpr>(expr);
+        auto target = read_expr->getTarget();
+        auto offset = read_expr->getOffset();
+        auto name = target->getName();
+        if (target->getKind() == bonc::ReadTarget::Input) {
+          if (name == "iv") {
+            return createVariable("IV_" + std::to_string(offset));
+          } else {
+            return TRUE;
+          }
+        }
+        auto expr = target->update_expressions.at(offset);
+        return generate(expr);
+      }
+      case bonc::BitExpr::Lookup: {
+        auto lookup_expr =
+            boost::static_pointer_cast<bonc::LookupBitExpr>(expr);
+        auto inputs = lookup_expr->getInputs();
+        auto table = lookup_expr->getTable();
+        auto template_ = buildTableTemplate(table.get());
+        std::vector<Var> output_vars;
+        if (auto modelled_it =
+                modelledSboxInputs.find(SBoxInputBlock{inputs, table});
+            modelled_it != modelledSboxInputs.end()) {
+          output_vars = modelled_it->second;
+        } else {
+          std::vector<Var> vars;
+          vars.reserve(inputs.size());
+          for (const auto& input : inputs) {
+            vars.push_back(generate(input));
+          }
+          for (auto i = 0uz; i < table->getOutputWidth(); i++) {
+            output_vars.push_back(createVariable(
+                std::format("{}_output_{}", table->getName(), i)));
+          }
+          auto weight_vars =
+              createWeightVariables(std::format("{}_weight", table->getName()),
+                                    table->getOutputWidth());
+          std::ranges::copy(output_vars, std::back_inserter(vars));
+          std::ranges::copy(weight_vars, std::back_inserter(vars));
+
+          auto template_ = buildTableTemplate(table.get());
+          for (auto& clause : *template_) {
+            SATClause sat_clause;
+            for (std::size_t i = 0; i < clause.size(); i++) {
+              const auto& entry = clause[i];
+              if (entry == TableSATTemplate::Positive) {
+                sat_clause.push_back(vars.at(i)->pos());
+              } else if (entry == TableSATTemplate::Entry::Negative) {
+                sat_clause.push_back(vars.at(i)->neg());
+              } else if (entry == TableSATTemplate::Entry::NotTaken) {
+                // Do nothing, this input is not used
+              }
+            }
+            constraints.push_back(std::move(sat_clause));
+          }
+          modelledSboxInputs.emplace(SBoxInputBlock{inputs, table},
+                                     output_vars);
+        }
+        auto output_offset = lookup_expr->getOutputOffset();
+        return output_vars.at(output_offset);
+      }
+      case bonc::BitExpr::Not: {
+        auto not_expr = boost::static_pointer_cast<bonc::NotBitExpr>(expr);
+        return generate(not_expr->getExpr());
+      }
+      case bonc::BitExpr::And: {
+        auto and_expr = boost::static_pointer_cast<bonc::BinaryBitExpr>(expr);
+        generate(and_expr->getLeft());
+        generate(and_expr->getRight());
+        break;
+      }
+      case bonc::BitExpr::Or: {
+        auto or_expr = boost::static_pointer_cast<bonc::BinaryBitExpr>(expr);
+        generate(or_expr->getLeft());
+        generate(or_expr->getRight());
+        break;
+      }
+      case bonc::BitExpr::Xor: {
+        auto xor_expr = boost::static_pointer_cast<bonc::BinaryBitExpr>(expr);
+        generate(xor_expr->getLeft());
+        generate(xor_expr->getRight());
+        break;
+      }
+      default: {
+        throw std::runtime_error("Unknown BitExpr kind");
+      }
+    }
+    // TODO
+    return TRUE;
+  }
+};
 
 int main() {
-  suppressed_read.reserve(1024);
-  std::ifstream ifs("bonc.json");
+  std::ifstream ifs("bonc_round1.json");
   bonc::FrontendResultParser parser(ifs);
 
-  std::vector<Polynomial> output_polys;
+  DifferentialSATModel model;
   for (auto& info : parser.parseAll()) {
     std::cout << "Output: " << info.name << ", Size: " << info.size << "\n";
     for (auto& expr : info.expressions) {
-      output_polys.push_back(bitExprToANF(expr));
+      model.generate(expr);
     }
   }
-  for (int i = 1151; i >= 1152 - 1000 - 2; i--) {
-    auto one_poly = output_polys.at(i);
-
-    one_poly = bonc::expandANF(one_poly.translate(numericMappingSubstitute));
-    // one_poly = bonc::expandANF(one_poly.translate(numericMappingSubstitute));
-    std::cerr << (1152 - i - 2) << ':' << numericMapping(one_poly) << '\n';
-  }
-  // int i = 921;
-  // auto one_poly = output_polys.at(i);
-  // std::cerr << (1152 - i - 2) << ':' << numericMapping(one_poly) << '\n';
 }
