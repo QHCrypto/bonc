@@ -11,7 +11,7 @@
       "program": "${workspaceFolder}/build/test/bonc-test",
       "args": [],
       "stopAtEntry": false,
-      "cwd": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}/build/test/",
       "environment": [],
       "externalConsole": false,
       "MIMode": "gdb",

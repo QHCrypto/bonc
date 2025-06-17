@@ -100,11 +100,10 @@ public:
   }
 };
 
-class SBoxInputBlock {
+struct SBoxInputBlock {
   std::vector<bonc::Ref<bonc::BitExpr>> inputs;
   bonc::Ref<bonc::LookupTable> table;
 
-public:
   friend bool operator==(const SBoxInputBlock& lhs,
                          const SBoxInputBlock& rhs) = default;
 
@@ -116,10 +115,6 @@ public:
     boost::hash_combine(seed, block.table);
     return seed;
   }
-
-  SBoxInputBlock(std::vector<bonc::Ref<bonc::BitExpr>> inputs,
-                 bonc::Ref<bonc::LookupTable> table)
-      : inputs(std::move(inputs)), table(std::move(table)) {}
 };
 
 class DifferentialSATModel {
@@ -187,6 +182,53 @@ class DifferentialSATModel {
   bonc::Ref<bonc::LookupTable> AND_TABLE;
   bonc::Ref<bonc::LookupTable> OR_TABLE;
 
+  Var generate_from_lookup_table(SBoxInputBlock block, int output_offset) {
+    auto [inputs, table] = std::move(block);
+    auto template_ = buildTableTemplate(table.get());
+    std::vector<Var> output_vars;
+    if (auto modelled_it =
+            modelledSboxInputs.find(SBoxInputBlock{inputs, table});
+        modelled_it != modelledSboxInputs.end()) {
+      output_vars = modelled_it->second;
+    } else {
+      std::vector<Var> vars;
+      vars.reserve(inputs.size());
+      for (const auto& input : inputs) {
+        vars.push_back(generate(input));
+      }
+      for (auto i = 0uz; i < table->getOutputWidth(); i++) {
+        output_vars.push_back(
+            createVariable(std::format("{}_output_{}", table->getName(), i)));
+      }
+      auto weight_vars = createWeightVariables(
+          std::format("{}_weight", table->getName()), table->getOutputWidth());
+      std::ranges::copy(output_vars, std::back_inserter(vars));
+      std::ranges::copy(weight_vars, std::back_inserter(vars));
+
+      auto template_ = buildTableTemplate(table.get());
+      for (auto& clause : *template_) {
+        SATClause sat_clause;
+        for (std::size_t i = 0; i < clause.size(); i++) {
+          const auto& entry = clause[i];
+          if (entry == TableSATTemplate::Positive) {
+            sat_clause.push_back(vars.at(i)->pos());
+          } else if (entry == TableSATTemplate::Entry::Negative) {
+            sat_clause.push_back(vars.at(i)->neg());
+          } else if (entry == TableSATTemplate::Entry::NotTaken) {
+            // Do nothing, this input is not used
+          }
+        }
+        constraints.push_back(std::move(sat_clause));
+      }
+      modelledSboxInputs.emplace(SBoxInputBlock{inputs, table}, output_vars);
+    }
+    if (output_offset >= output_vars.size()) {
+      // Preprocess always runs on 8-bits unit, but s-box can be smaller width
+      return TRUE;
+    }
+    return output_vars.at(output_offset);
+  }
+
 public:
   DifferentialSATModel() {
     TRUE = createVariable("TRUE");
@@ -240,50 +282,9 @@ public:
       case bonc::BitExpr::Lookup: {
         auto lookup_expr =
             boost::static_pointer_cast<bonc::LookupBitExpr>(expr);
-        auto inputs = lookup_expr->getInputs();
-        auto table = lookup_expr->getTable();
-        auto template_ = buildTableTemplate(table.get());
-        std::vector<Var> output_vars;
-        if (auto modelled_it =
-                modelledSboxInputs.find(SBoxInputBlock{inputs, table});
-            modelled_it != modelledSboxInputs.end()) {
-          output_vars = modelled_it->second;
-        } else {
-          std::vector<Var> vars;
-          vars.reserve(inputs.size());
-          for (const auto& input : inputs) {
-            vars.push_back(generate(input));
-          }
-          for (auto i = 0uz; i < table->getOutputWidth(); i++) {
-            output_vars.push_back(createVariable(
-                std::format("{}_output_{}", table->getName(), i)));
-          }
-          auto weight_vars =
-              createWeightVariables(std::format("{}_weight", table->getName()),
-                                    table->getOutputWidth());
-          std::ranges::copy(output_vars, std::back_inserter(vars));
-          std::ranges::copy(weight_vars, std::back_inserter(vars));
-
-          auto template_ = buildTableTemplate(table.get());
-          for (auto& clause : *template_) {
-            SATClause sat_clause;
-            for (std::size_t i = 0; i < clause.size(); i++) {
-              const auto& entry = clause[i];
-              if (entry == TableSATTemplate::Positive) {
-                sat_clause.push_back(vars.at(i)->pos());
-              } else if (entry == TableSATTemplate::Entry::Negative) {
-                sat_clause.push_back(vars.at(i)->neg());
-              } else if (entry == TableSATTemplate::Entry::NotTaken) {
-                // Do nothing, this input is not used
-              }
-            }
-            constraints.push_back(std::move(sat_clause));
-          }
-          modelledSboxInputs.emplace(SBoxInputBlock{inputs, table},
-                                     output_vars);
-        }
-        auto output_offset = lookup_expr->getOutputOffset();
-        return output_vars.at(output_offset);
+        return generate_from_lookup_table(
+            SBoxInputBlock{lookup_expr->getInputs(), lookup_expr->getTable()},
+            lookup_expr->getOutputOffset());
       }
       case bonc::BitExpr::Not: {
         auto not_expr = boost::static_pointer_cast<bonc::NotBitExpr>(expr);
@@ -291,15 +292,16 @@ public:
       }
       case bonc::BitExpr::And: {
         auto and_expr = boost::static_pointer_cast<bonc::BinaryBitExpr>(expr);
-        generate(and_expr->getLeft());
-        generate(and_expr->getRight());
-        break;
+        return generate_from_lookup_table(
+            SBoxInputBlock{{and_expr->getLeft(), and_expr->getRight()},
+                           AND_TABLE},
+            0);
       }
       case bonc::BitExpr::Or: {
         auto or_expr = boost::static_pointer_cast<bonc::BinaryBitExpr>(expr);
-        generate(or_expr->getLeft());
-        generate(or_expr->getRight());
-        break;
+        return generate_from_lookup_table(
+            SBoxInputBlock{{or_expr->getLeft(), or_expr->getRight()}, OR_TABLE},
+            0);
       }
       case bonc::BitExpr::Xor: {
         auto xor_expr = boost::static_pointer_cast<bonc::BinaryBitExpr>(expr);
