@@ -305,8 +305,20 @@ public:
       }
       case bonc::BitExpr::Xor: {
         auto xor_expr = boost::static_pointer_cast<bonc::BinaryBitExpr>(expr);
-        generate(xor_expr->getLeft());
-        generate(xor_expr->getRight());
+        auto left = generate(xor_expr->getLeft());
+        auto right = generate(xor_expr->getRight());
+        if (left == TRUE) {
+          return right;
+        }
+        if (right == TRUE) {
+          return left;
+        }
+        auto result = createVariable(
+            std::format("{}_xor_{}", left->name, right->name));
+        constraints.push_back(SATClause{left->neg(), right->neg(), result->neg()});
+        constraints.push_back(SATClause{left->pos(), right->pos(), result->neg()});
+        constraints.push_back(SATClause{left->neg(), right->pos(), result->pos()});
+        constraints.push_back(SATClause{left->pos(), right->neg(), result->pos()});
         break;
       }
       default: {
