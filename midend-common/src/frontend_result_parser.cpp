@@ -141,8 +141,11 @@ Ref<LookupTable> FrontendResultParser::getLookupTable(
   return lookup_tables.at(name);
 }
 
-ANFPolynomial<ReadTargetAndOffset> bitExprToANF(Ref<BitExpr> expr,
-                                                int read_depth) {
+std::unordered_map<Ref<BitExpr>, ANFPolynomial<ReadTargetAndOffset>>
+    bitExprToANFCache;
+
+ANFPolynomial<ReadTargetAndOffset> bitExprToANFImpl(Ref<BitExpr> expr,
+                                                    int read_depth) {
   switch (expr->getKind()) {
     case BitExpr::Constant:
       return ANFPolynomial<ReadTargetAndOffset>(
@@ -177,10 +180,15 @@ ANFPolynomial<ReadTargetAndOffset> bitExprToANF(Ref<BitExpr> expr,
       auto output_offset = lookup_expr->getOutputOffset();
       auto anf_rep = table->getANFRepresentation(output_offset);
       auto result = ANFPolynomial<ReadTargetAndOffset>::fromConstant(false);
-      for (std::size_t i = 0; i < inputs.size(); i++) {
+      for (std::size_t i = 0; i < anf_rep.size(); i++) {
         if (anf_rep.test(i)) {
-          auto input_anf = bitExprToANF(inputs[i], read_depth);
-          result += input_anf;
+          ANFPolynomial<ReadTargetAndOffset> term(true);
+          for (std::size_t j = 0; j < inputs.size(); j++) {
+            if (i & (1 << j)) {
+              term *= bitExprToANF(inputs[j], read_depth);
+            }
+          }
+          result += term;
         }
       }
       return result;
@@ -205,6 +213,16 @@ ANFPolynomial<ReadTargetAndOffset> bitExprToANF(Ref<BitExpr> expr,
     }
     default: throw std::runtime_error("Unknown BitExpr kind");
   }
+}
+
+ANFPolynomial<ReadTargetAndOffset> bitExprToANF(Ref<BitExpr> expr,
+                                                int read_depth) {
+  if (bitExprToANFCache.find(expr) != bitExprToANFCache.end()) {
+    return bitExprToANFCache[expr];
+  }
+  auto result = bitExprToANFImpl(expr, read_depth);
+  bitExprToANFCache[expr] = result;
+  return result;
 }
 
 }  // namespace bonc

@@ -105,21 +105,40 @@ constexpr const bool ENABLE_MONOMIAL_OPTIMIZATION = true;
 using namespace std::literals;
 
 static std::vector<std::string> debugLinePrefix{""s};
-[[gnu::always_inline]] inline auto pushDebugLinePrefix(const std::string& str = "| ") {
+[[gnu::always_inline]] inline auto pushDebugLinePrefix(
+    const std::string& str = "| ") {
   debugLinePrefix.push_back(debugLinePrefix.back() + str);
-  return move_defer { debugLinePrefix.pop_back(); };
+  return move_defer {
+    debugLinePrefix.pop_back();
+  };
 }
 
-[[gnu::always_inline]] inline std::ostream& printDebugNewline() {
-  return std::cout << '\n' << debugLinePrefix.back();
+struct NoOp {
+  const NoOp& operator<<(auto&&) const {
+    return *this;
+  }
+};
+inline constexpr NoOp NO_OP;
+[[gnu::always_inline]] inline auto& printDebugNewline() {
+  return NO_OP;
+  // return std::cout << '\n' << debugLinePrefix.back();
 }
+[[gnu::always_inline]] inline auto& printDebug() {
+  return NO_OP;
+  // return std::cout;
+}
+
+std::unordered_map<Monomial, int> monomial_degrees;
 
 int monomialDegree(const Monomial& monomial) {
+  if (auto it = monomial_degrees.find(monomial); it != monomial_degrees.end()) {
+    return it->second;
+  }
   auto debug_scope = pushDebugLinePrefix();
   bool apply_optimization = ENABLE_MONOMIAL_OPTIMIZATION && monomial.size() > 1
                          && monomial.size() <= 6;
   printDebugNewline() << "BEGIN EMN ";
-  monomial.print(std::cout);
+  // monomial.print(std::cout);
   if (apply_optimization) {
     int result = std::numeric_limits<int>::max();
     printDebugNewline() << "Finding optimization";
@@ -128,10 +147,10 @@ int monomialDegree(const Monomial& monomial) {
       for (auto partition : monomialPartition(monomial)) {
         printDebugNewline() << "BEGIN OPT { ";
         for (const auto& mono : partition) {
-          mono.print(std::cout);
-          std::cout << ", ";
+          // mono.print(std::cout);
+          printDebug() << ", ";
         }
-        std::cout << "}";
+        printDebug() << "}";
         int deg = 0;
         for (const auto& mono : partition) {
           if (mono.size() == 1) {
@@ -142,40 +161,40 @@ int monomialDegree(const Monomial& monomial) {
           if (it == monomial_better_bound.end()) {
             printDebugNewline() << "END   OPT { ";
             for (const auto& mono : partition) {
-              mono.print(std::cout);
-              std::cout << ", ";
+              // mono.print(std::cout);
+              printDebug() << ", ";
             }
-            std::cout << "} (";
-            mono.print(std::cout);
-            std::cout << ") not found";
+            printDebug() << "} (";
+            // mono.print(std::cout);
+            printDebug() << ") not found";
             goto next_partition;
           }
           if (suppressed_read.contains(it->second)) {
             printDebugNewline() << "END   OPT { ";
             for (const auto& mono : partition) {
-              mono.print(std::cout);
-              std::cout << ", ";
+              // mono.print(std::cout);
+              printDebug() << ", ";
             }
-            std::cout << "} (";
-            mono.print(std::cout);
-            std::cout << ") suppressed";
+            printDebug() << "} (";
+            // mono.print(std::cout);
+            printDebug() << ") suppressed";
             goto next_partition;
           }
           deg += variableDegree(it->second);
         }
         printDebugNewline() << "END   OPT { ";
         for (const auto& mono : partition) {
-          mono.print(std::cout);
-          std::cout << ", ";
+          // mono.print(std::cout);
+          printDebug() << ", ";
         }
-        std::cout << "} deg: " << deg;
+        printDebug() << "} deg: " << deg;
         result = std::min(result, deg);
       next_partition:;
       }
     }
     printDebugNewline() << "END   EMN ";
-    monomial.print(std::cout);
-    std::cout << " as " << result;
+    // monomial.print(std::cout);
+    printDebug() << " as " << result;
     return result;
   } else {
     int result = 0;
@@ -184,23 +203,31 @@ int monomialDegree(const Monomial& monomial) {
       result += varDeg;
     }
     printDebugNewline() << "END   EMN ";
-    monomial.print(std::cout);
-    std::cout << " as " << result;
+    // monomial.print(std::cout);
+    printDebug() << " as " << result;
+    monomial_degrees[monomial] = result;
     return result;
   }
 }
 
+std::unordered_map<Polynomial, int> polynomial_degrees;
+
 int numericMapping(const Polynomial& poly) {
+  if (auto it = polynomial_degrees.find(poly); it != polynomial_degrees.end()) {
+    return it->second;
+  }
   auto debug_scope = pushDebugLinePrefix();
+  // std::cerr << "<" << poly.monomials.size() << ">";
   printDebugNewline() << "BEGIN EPL ";
-  poly.print(std::cout);
+  // poly.print(std::cout);
   int poly_deg = poly.constant ? 0 : std::numeric_limits<int>::min();
   for (auto& monomial : poly) {
     poly_deg = std::max(poly_deg, monomialDegree(monomial));
   }
   printDebugNewline() << "END   EPL ";
-  poly.print(std::cout);
-  std::cout << " as " << poly_deg;
+  // poly.print(std::cout);
+  printDebug() << " as " << poly_deg;
+  polynomial_degrees[poly] = poly_deg;
   return poly_deg;
 };
 
@@ -214,15 +241,15 @@ int variableDegree(bonc::ReadTargetAndOffset rto) {
     }
   };
   printDebugNewline() << "BEGIN EVR ";
-  rto.print(std::cout);
+  // rto.print(std::cout);
 
   auto kind = read_target->getKind();
   auto name = read_target->getName();
   if (kind == bonc::ReadTarget::Input) {
     printDebugNewline() << "END   EVR ";
-    rto.print(std::cout);
-    std::cout << " as input";
-    if (name == "iv") {
+    // rto.print(std::cout);
+    printDebug() << " as input";
+    if (name == "iv" || name == "plaintext") {
       return 1;
     } else {
       return 0;
@@ -231,27 +258,32 @@ int variableDegree(bonc::ReadTargetAndOffset rto) {
     auto it = read_expr_degs.find(rto);
     if (it != read_expr_degs.end()) {
       printDebugNewline() << "END   EVR ";
-      rto.print(std::cout);
-      std::cout << " as previously founded " << it->second;
+      // rto.print(std::cout);
+      printDebug() << " as previously founded " << it->second;
       return it->second;
     } else {
       auto anf = readState(rto);
       anf = expandANF(anf.translate(numericMappingSubstitute));
       printDebugNewline() << "expand ANF to ";
-      anf.print(std::cout);
+      // anf.print(std::cout);
       auto result = numericMapping(anf);
       read_expr_degs[rto] = result;
       printDebugNewline() << "END   EVR ";
-      rto.print(std::cout);
-      std::cout << " as " << result;
+      // rto.print(std::cout);
+      printDebug() << " as " << result;
       return result;
     }
   }
 }
 
-int main() {
+int main(int argc, char** argv) {
+  const char* filename = "bonc_.json";
+  if (argc > 1) {
+    filename = argv[1];
+  }
+  std::cout << "Reading file: " << filename << '\n';
   suppressed_read.reserve(1024);
-  std::ifstream ifs("bonc.json");
+  std::ifstream ifs(filename);
   bonc::FrontendResultParser parser(ifs);
 
   std::vector<Polynomial> output_polys;
@@ -261,13 +293,19 @@ int main() {
       output_polys.push_back(bitExprToANF(expr));
     }
   }
-  for (int i = 1151; i >= 1152 - 1000 - 2; i--) {
-    auto one_poly = output_polys.at(i);
-
-    one_poly = bonc::expandANF(one_poly.translate(numericMappingSubstitute));
-    // one_poly = bonc::expandANF(one_poly.translate(numericMappingSubstitute));
-    std::cerr << (1152 - i - 2) << ':' << numericMapping(one_poly) << '\n';
+  for (auto& poly : output_polys) {
+    std::cout << std::clamp(numericMapping(poly), -1, std::numeric_limits<int>::max()) << ',';
   }
+  std::cout << '\n';
+
+  // for (auto i = 0uz; i < output_polys.size(); i++) {
+  //   if (i % (384 * 8) == 0) {
+  //     auto one_poly = output_polys.at(i);
+  //     one_poly = bonc::expandANF(one_poly.translate(numericMappingSubstitute));
+  //     std::cout << std::clamp(numericMapping(one_poly), -1, 1000) << ',';
+  //     std::cout.flush();
+  //   }
+  // }
   // int i = 921;
   // auto one_poly = output_polys.at(i);
   // std::cerr << (1152 - i - 2) << ':' << numericMapping(one_poly) << '\n';

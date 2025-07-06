@@ -10,4 +10,5 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 endif()
 
 add_subdirectory(midend-common)
+add_subdirectory(midend-nm)
 add_subdirectory(test)
