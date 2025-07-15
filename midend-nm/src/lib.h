@@ -29,3 +29,6 @@ using Monomial = bonc::ANFMonomial<bonc::ReadTargetAndOffset>;
 using Polynomial = bonc::ANFPolynomial<bonc::ReadTargetAndOffset>;
 
 int numericMapping(const Polynomial& poly);
+
+
+void setInputDegree(std::unordered_map<std::string, int> input_degrees, int default_degree = 0);

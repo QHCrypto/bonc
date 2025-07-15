@@ -122,7 +122,16 @@ int numericMapping(const Polynomial& poly) {
   }
   polynomial_degrees[poly] = poly_deg;
   return poly_deg;
-};
+}
+
+static std::unordered_map<std::string, int> input_degrees;
+static int default_input_degree = 0;
+
+void setInputDegree(std::unordered_map<std::string, int> new_input_degrees,
+                      int new_default_degree) {
+  input_degrees = std::move(new_input_degrees);
+  default_input_degree = new_default_degree;
+}
 
 int variableDegree(bonc::ReadTargetAndOffset rto) {
   auto [read_target, offset] = rto;
@@ -136,10 +145,11 @@ int variableDegree(bonc::ReadTargetAndOffset rto) {
   auto kind = read_target->getKind();
   auto name = read_target->getName();
   if (kind == bonc::ReadTarget::Input) {
-    if (name == "iv" || name == "plaintext") {
-      return 1;
+    auto it = input_degrees.find(name);
+    if (it != input_degrees.end()) {
+      return it->second;
     } else {
-      return 0;
+      return default_input_degree;
     }
   } else {
     auto it = read_expr_degs.find(rto);
