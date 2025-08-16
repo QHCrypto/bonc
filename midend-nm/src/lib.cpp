@@ -157,7 +157,7 @@ int variableDegree(bonc::ReadTargetAndOffset rto) {
       return it->second;
     } else {
       auto anf = readState(rto);
-      anf = expandANF(anf.translate(numericMappingSubstitute));
+      // anf = expandANF(anf.translate(numericMappingSubstitute));
       auto result = numericMapping(anf);
       read_expr_degs[rto] = result;
       return result;

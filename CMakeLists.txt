@@ -9,6 +9,9 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_compile_options(-stdlib=libc++)
 endif()
 
+add_subdirectory(espresso)
+add_subdirectory(sat-modeller)
+
 add_subdirectory(midend-common)
 add_subdirectory(midend-nm)
 add_subdirectory(test)
