@@ -1,4 +1,3 @@
-
 find_package(Boost REQUIRED COMPONENTS program_options)
 
 add_executable(bonc-midend-nm src/lib.cpp src/main.cpp)

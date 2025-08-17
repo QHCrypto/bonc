@@ -5,7 +5,9 @@
 #include "defer.hpp"
 
 extern "C" {
+#define register
 #include <espresso.h>
+#undef register
 #ifdef bool
 #undef bool
 #endif
@@ -14,21 +16,25 @@ extern "C" {
 namespace bonc::sat_modeller::espresso_cxx {
 
 static int init = []() {
-  ::total_name[READ_TIME] = "READ       ";
-  ::total_name[WRITE_TIME] = "WRITE      ";
-  ::total_name[COMPL_TIME] = "COMPL      ";
-  ::total_name[REDUCE_TIME] = "REDUCE     ";
-  ::total_name[EXPAND_TIME] = "EXPAND     ";
-  ::total_name[ESSEN_TIME] = "ESSEN      ";
-  ::total_name[IRRED_TIME] = "IRRED      ";
-  ::total_name[GREDUCE_TIME] = "REDUCE_GASP";
-  ::total_name[GEXPAND_TIME] = "EXPAND_GASP";
-  ::total_name[GIRRED_TIME] = "IRRED_GASP ";
-  ::total_name[MV_REDUCE_TIME] = "MV_REDUCE  ";
-  ::total_name[RAISE_IN_TIME] = "RAISE_IN   ";
-  ::total_name[VERIFY_TIME] = "VERIFY     ";
-  ::total_name[PRIMES_TIME] = "PRIMES     ";
-  ::total_name[MINCOV_TIME] = "MINCOV     ";
+#define INIT_STRING(index, string) ::total_name[index] = const_cast<char*>(string)
+
+  INIT_STRING(READ_TIME, "READ       ");
+  INIT_STRING(WRITE_TIME, "WRITE      ");
+  INIT_STRING(COMPL_TIME, "COMPL      ");
+  INIT_STRING(REDUCE_TIME, "REDUCE     ");
+  INIT_STRING(EXPAND_TIME, "EXPAND     ");
+  INIT_STRING(ESSEN_TIME, "ESSEN      ");
+  INIT_STRING(IRRED_TIME, "IRRED      ");
+  INIT_STRING(GREDUCE_TIME, "REDUCE_GASP");
+  INIT_STRING(GEXPAND_TIME, "EXPAND_GASP");
+  INIT_STRING(GIRRED_TIME, "IRRED_GASP ");
+  INIT_STRING(MV_REDUCE_TIME, "MV_REDUCE  ");
+  INIT_STRING(RAISE_IN_TIME, "RAISE_IN   ");
+  INIT_STRING(VERIFY_TIME, "VERIFY     ");
+  INIT_STRING(PRIMES_TIME, "PRIMES     ");
+  INIT_STRING(MINCOV_TIME, "MINCOV     ");
+
+#undef INIT_STRING
   // option = 0;			/* default -D: ESPRESSO */
   // out_type = F_type;		/* default -o: default is ON-set only */
   ::debug = 0;             /* default -d: no debugging info */

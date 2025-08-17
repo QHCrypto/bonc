@@ -14,7 +14,6 @@ set_target_properties(espresso PROPERTIES
     C_STANDARD 99
 )
 
-target_compile_options(espresso PRIVATE -Wno-write-strings)
 target_include_directories(espresso PUBLIC "${espresso_SOURCE_DIR}/espresso-src")
 
 # Optionally, install the library and headers

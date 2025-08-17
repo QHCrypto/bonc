@@ -3,10 +3,12 @@
 #include <cassert>
 #include <cmath>
 #include <format>
+#include <iostream>
 #include <string>
 #include <unordered_set>
 #include <vector>
-#include <iostream>
+
+#include "table-template.h"
 
 namespace bonc::sat_modeller {
 
@@ -62,7 +64,7 @@ inline Literal Variable::operator-() const {
   return Literal(-Literal::ValueT(index));
 }
 
-}
+}  // namespace bonc::sat_modeller
 
 template <>
 struct std::hash<bonc::sat_modeller::Variable> {
@@ -94,12 +96,13 @@ private:
 
 public:
   Variable createVariable(const std::string& name = "");
-  std::vector<Variable> createVariables(std::size_t count, const std::string& name_prefix = "");
+  std::vector<Variable> createVariables(std::size_t count,
+                                        const std::string& name_prefix = "");
   void addClause(const std::vector<Literal>& lits);
+  static TableTemplate buildTableTemplate(const RawTable& table);
   std::vector<Variable> addWeightTableClauses(
-      const RawTable& table, const std::vector<Variable>& inputs,
-      const std::vector<Variable>& outputs,
-      const std::vector<std::vector<int>>& weights);
+      const TableTemplate& table, const std::vector<Variable>& inputs,
+      const std::vector<Variable>& outputs);
   void addXorClause(const std::vector<Variable>& values, Variable result);
   void addAndClause(const std::vector<Variable>& values, Variable result);
   void addOrClause(const std::vector<Variable>& values, Variable result);

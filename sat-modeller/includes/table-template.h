@@ -34,6 +34,12 @@ public:
   auto end(this auto&& self) {
     return self.clauses.end();
   }
+  std::size_t size() const {
+    return clauses.size();
+  }
+  auto&& at(this auto&& self, std::size_t index) {
+    return self.clauses.at(index);
+  }
 };
 
 }
