@@ -1,6 +1,16 @@
 #include "frontend_result_parser.h"
 
+#include <utility>
+
 namespace bonc {
+
+std::size_t ExprStoreHash::operator()(const Ref<BitExpr>& expr) const {
+  return expr->hash_value();
+}
+
+bool ExprStoreEqual::operator()(const Ref<BitExpr>& lhs, const Ref<BitExpr>& rhs) const {
+  return lhs->equals(*rhs);
+}
 
 FrontendResultParser::FrontendResultParser(std::istream& json_content) {
   value = nlohmann::json::parse(json_content);
@@ -67,7 +77,7 @@ Ref<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,
     auto target_name = j.at("target_name").get<std::string>();
     auto offset = j.at("offset").get<int>();
     auto target = parser.getReadTarget(target_name);
-    return ReadBitExpr::create(target, offset);
+    return parser.createExpr<ReadBitExpr>(target, offset);
   } else if (type == "lookup") {
     // Parse lookup_expression
     auto table_name = j.at("table_name").get<std::string>();
@@ -77,13 +87,13 @@ Ref<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,
       inputs.push_back(fromJSON(parser, input));
     }
     unsigned output_offset = j.at("output_offset").get<unsigned>();
-    return LookupBitExpr::create(table, std::move(inputs), output_offset);
+    return parser.createExpr<LookupBitExpr>(table, std::move(inputs), output_offset);
   } else if (type == "unary") {
     // Parse unary_expression
     auto op = j.at("operator").get<std::string>();
     if (op == "not") {
       auto operand = fromJSON(parser, j.at("operand"));
-      return NotBitExpr::create(operand);
+      return parser.createExpr<NotBitExpr>(operand);
     }
   } else if (type == "binary") {
     // Parse binary_expression
@@ -91,11 +101,11 @@ Ref<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,
     auto left = fromJSON(parser, j.at("left"));
     auto right = fromJSON(parser, j.at("right"));
     if (op == "and") {
-      return new BinaryBitExpr(BinaryBitExpr::And, left, right);
+      return parser.createExpr<BinaryBitExpr>(BinaryBitExpr::And, left, right);
     } else if (op == "or") {
-      return new BinaryBitExpr(BinaryBitExpr::Or, left, right);
+      return parser.createExpr<BinaryBitExpr>(BinaryBitExpr::Or, left, right);
     } else if (op == "xor") {
-      return new BinaryBitExpr(BinaryBitExpr::Xor, left, right);
+      return parser.createExpr<BinaryBitExpr>(BinaryBitExpr::Xor, left, right);
     }
   }
 

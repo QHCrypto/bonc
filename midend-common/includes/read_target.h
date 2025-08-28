@@ -27,13 +27,16 @@ public:
   std::vector<Ref<BitExpr>> update_expressions;
 
   ReadTarget(Kind kind, std::string name, std::size_t size)
-      : kind{kind}, name{std::move(name)} {}
+      : kind{kind}, name{std::move(name)}, size{size} {}
 
   Kind getKind() const {
     return kind;
   }
   const std::string &getName() const {
     return name;
+  }
+  std::size_t getSize() const {
+    return size;
   }
 };
 

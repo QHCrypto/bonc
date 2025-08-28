@@ -71,6 +71,11 @@ void setPos(bool pos) {
 }
 
 PPLA readPlaForEspresso(const std::string& input) {
+  memset(&::cube, 0, sizeof(::cube));
+  memset(&::temp_cube_save, 0, sizeof(::temp_cube_save));
+  memset(&::cdata, 0, sizeof(::cdata));
+  memset(&::temp_cdata_save, 0, sizeof(::temp_cdata_save));
+
   auto fp = fmemopen(const_cast<char*>(input.c_str()), input.size(), "r");
   if (!fp) {
     throw std::runtime_error("Failed to open memory stream for PLA input");

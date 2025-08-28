@@ -58,6 +58,9 @@ public:
   ValueT getIndex() const {
     return index;
   }
+  bool negative() const {
+    return index < 0;
+  }
 };
 
 inline Literal Variable::operator-() const {
@@ -110,6 +113,16 @@ public:
   void printLiteral(std::ostream& os, Literal lit, bool print_name) const;
   void print(std::ostream& os, bool print_names = true) const;
   void printDIMACS(std::ostream& os);
+
+  std::size_t variableSize() const {
+    return variables.size();
+  }
+  const VariableDetail& getVariableDetail(std::size_t index) const {
+    return variables.at(index);
+  }
+  std::vector<Clause> getClauses() const {
+    return clauses;
+  }
 };
 
 }  // namespace bonc::sat_modeller

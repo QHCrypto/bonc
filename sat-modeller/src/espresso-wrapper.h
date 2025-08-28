@@ -13,6 +13,9 @@ struct PLADestructor {
 
 using PPLA = std::unique_ptr<void, PLADestructor>;
 
+/**
+ * @brief Whether use PoS (Product-of-Sum) output format.
+ */
 void setPos(bool pos);
 PPLA readPlaForEspresso(const std::string& input);
 std::string plaToString(const PPLA& pla);

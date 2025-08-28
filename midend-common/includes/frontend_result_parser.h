@@ -20,14 +20,38 @@ struct OutputInfo {
   std::vector<Ref<BitExpr>> expressions;
 };
 
+class ExprStoreHash {
+public:
+  std::size_t operator()(const Ref<BitExpr>& expr) const;
+};
+
+class ExprStoreEqual {
+public:
+  bool operator()(const Ref<BitExpr>& lhs, const Ref<BitExpr>& rhs) const;
+};
+
+using ExprStore = std::unordered_set<Ref<BitExpr>, ExprStoreHash, ExprStoreEqual>;
+
 class FrontendResultParser {
 private:
   nlohmann::json value;
   std::map<std::string, Ref<ReadTarget>> read_targets;
   std::map<std::string, Ref<LookupTable>> lookup_tables;
 
+  mutable ExprStore expr_store;
+
 public:
   FrontendResultParser(std::istream& json_content);
+
+  template <std::derived_from<BitExpr> T, typename... Args>
+  Ref<T> createExpr(Args&&... args) const {
+    Ref expr = new T(std::forward<Args>(args)...);
+    if (auto it = expr_store.find(expr); it != expr_store.end()) {
+      return boost::static_pointer_cast<T>(*it);
+    }
+    auto [it, suc] = expr_store.insert(std::move(expr));
+    return boost::static_pointer_cast<T>(*it);
+  }
 
   std::vector<OutputInfo> parseAll();
 
@@ -48,9 +72,14 @@ public:
   };
   BitExpr() = default;
   virtual ~BitExpr() = default;
+  friend bool operator==(const BitExpr& lhs, const BitExpr& rhs) {
+    return lhs.equals(rhs);
+  }
 
   virtual Kind getKind() const = 0;
   virtual void print(std::ostream& os) const = 0;
+  virtual bool equals(const BitExpr& rhs) const = 0;
+  virtual std::size_t hash_value() const = 0;
 
   static Ref<BitExpr> fromJSON(const FrontendResultParser& parser,
                                const nlohmann::json& j);
@@ -66,10 +95,6 @@ private:
 public:
   ConstantBitExpr(bool value) : value{value} {}
 
-  static Ref<ConstantBitExpr> create(bool value) {
-    return new ConstantBitExpr(value);
-  }
-
   Kind getKind() const override {
     return kind;
   }
@@ -80,6 +105,15 @@ public:
 
   void print(std::ostream& os) const override {
     os << value;
+  }
+  bool equals(const BitExpr& rhs) const override {
+    if (auto other = dynamic_cast<const ConstantBitExpr*>(&rhs)) {
+      return value == other->value;
+    }
+    return false;
+  }
+  std::size_t hash_value() const override {
+    return std::hash<bool>()(value);
   }
 };
 
@@ -112,10 +146,6 @@ public:
   ReadBitExpr(Ref<ReadTarget> target, unsigned offset)
       : target_and_offset(std::move(target), offset) {}
 
-  static Ref<ReadBitExpr> create(Ref<ReadTarget> target, unsigned offset) {
-    return new ReadBitExpr(std::move(target), offset);
-  }
-
   const ReadTargetAndOffset& getTargetAndOffset() const {
     return target_and_offset;
   }
@@ -134,6 +164,15 @@ public:
   void print(std::ostream& os) const override {
     target_and_offset.print(os);
   }
+  bool equals(const BitExpr& rhs) const override {
+    if (auto other = dynamic_cast<const ReadBitExpr*>(&rhs)) {
+      return target_and_offset == other->target_and_offset;
+    }
+    return false;
+  }
+  std::size_t hash_value() const override {
+    return boost::hash<ReadTargetAndOffset>()(target_and_offset);
+  }
 };
 
 class LookupBitExpr : public BitExpr {
@@ -150,13 +189,6 @@ public:
                 unsigned output_offset)
       : table{table}, inputs{std::move(inputs)}, output_offset{output_offset} {}
 
-  static Ref<LookupBitExpr> create(Ref<LookupTable> table,
-                                   std::vector<Ref<BitExpr>> inputs,
-                                   unsigned output_offset) {
-    return new LookupBitExpr(std::move(table), std::move(inputs),
-                             output_offset);
-  }
-
   Ref<LookupTable> getTable() const {
     return table;
   }
@@ -172,6 +204,19 @@ public:
   }
 
   void print(std::ostream& os) const override;
+  bool equals(const BitExpr& rhs) const override {
+    if (auto other = dynamic_cast<const LookupBitExpr*>(&rhs)) {
+      return table == other->table && inputs == other->inputs &&
+             output_offset == other->output_offset;
+    }
+    return false;
+  }
+  std::size_t hash_value() const override {
+    std::size_t seed = boost::hash<Ref<LookupTable>>{}(table);
+    boost::hash_range(seed, inputs.begin(), inputs.end());
+    boost::hash_combine(seed, output_offset);
+    return seed;
+  }
 };
 
 class NotBitExpr : public BitExpr {
@@ -184,10 +229,6 @@ private:
 public:
   NotBitExpr(Ref<BitExpr> expr) : expr{expr} {}
 
-  static Ref<NotBitExpr> create(Ref<BitExpr> expr) {
-    return new NotBitExpr(expr);
-  }
-
   Kind getKind() const override {
     return kind;
   }
@@ -196,6 +237,15 @@ public:
   }
 
   void print(std::ostream& os) const override;
+  bool equals(const BitExpr& rhs) const override {
+    if (auto other = dynamic_cast<const NotBitExpr*>(&rhs)) {
+      return expr == other->expr;
+    }
+    return false;
+  }
+  std::size_t hash_value() const override {
+    return boost::hash<Ref<BitExpr>>{}(expr);
+  }
 };
 
 class BinaryBitExpr : public BitExpr {
@@ -207,11 +257,9 @@ public:
   BinaryBitExpr(Kind kind, Ref<BitExpr> left, Ref<BitExpr> right)
       : kind{kind}, left{left}, right{right} {
     assert(And <= kind && kind <= Xor && "invalid kind");
-  }
-
-  static Ref<BinaryBitExpr> create(Kind kind, Ref<BitExpr> left,
-                                   Ref<BitExpr> right) {
-    return new BinaryBitExpr(kind, left, right);
+    if (left.get() > right.get()) {
+      std::swap(left, right);
+    }
   }
 
   Kind getKind() const override {
@@ -226,6 +274,20 @@ public:
   }
 
   void print(std::ostream& os) const override;
+  bool equals(const BitExpr& rhs) const override {
+    if (auto other = dynamic_cast<const BinaryBitExpr*>(&rhs)) {
+      return kind == other->kind && left == other->left &&
+             right == other->right;
+    }
+    return false;
+  }
+
+  std::size_t hash_value() const override {
+    std::size_t seed = boost::hash<Kind>()(kind);
+    boost::hash_combine(seed, left);
+    boost::hash_combine(seed, right);
+    return seed;
+  }
 };
 
 ANFPolynomial<ReadTargetAndOffset> bitExprToANF(Ref<BitExpr> expr,

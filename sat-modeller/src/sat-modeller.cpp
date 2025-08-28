@@ -34,8 +34,8 @@ TableTemplate SATModel::buildTableTemplate(const RawTable& table) {
   auto input_width = std::bit_width(table.size() - 1);
   auto output_width = std::bit_width(table.at(0).size() - 1);
 
-  auto get_weight = [output_width](std::uint64_t x) {
-    return output_width - int(std::log2(x));
+  auto get_weight = [input_width](std::uint64_t x) {
+    return input_width - int(std::log2(x));
   };
   std::string espresso_input;
   espresso_input +=
@@ -73,10 +73,7 @@ std::vector<Variable> SATModel::addWeightTableClauses(
   auto output_width = outputs.size();
   assert(input_width + output_width * 2 == table.at(0).size());
 
-  auto get_weight = [output_width](std::uint64_t x) {
-    return output_width - int(std::log2(x));
-  };
-  auto weight_vars = createVariables(output_width);
+  auto weight_vars = createVariables(output_width, "w");
   for (const auto& row : table) {
     auto clause = std::vector<Literal>();
     for (auto i = 0uz; i < row.size(); i++) {
@@ -199,7 +196,7 @@ void SATModel::print(std::ostream& os, bool print_names) const {
 }
 
 void SATModel::printDIMACS(std::ostream& os) {
-  os << "p cnf " << variables.size() << " " << clauses.size() << "\n";
+  os << "p cnf " << variables.size() - 1 << " " << clauses.size() << "\n";
   for (const auto& clause : clauses) {
     for (const auto& lit : clause.lits) {
       os << lit.getIndex() << " ";

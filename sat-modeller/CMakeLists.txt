@@ -5,6 +5,11 @@ project(SatModeller)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(sat-modeller src/main.cpp src/espresso-wrapper.cpp src/sat-modeller.cpp)
+add_library(sat-modeller src/espresso-wrapper.cpp src/sat-modeller.cpp)
 target_include_directories(sat-modeller PUBLIC includes)
 target_link_libraries(sat-modeller PRIVATE espresso)
+
+target_compile_options(sat-modeller PRIVATE
+  $<$<CXX_COMPILER_ID:MSVC>:/W4>
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
+)
