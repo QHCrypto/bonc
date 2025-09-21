@@ -1,10 +1,12 @@
+find_package(Boost REQUIRED COMPONENTS program_options)
+
 add_executable(bonc-backend-sat src/main.cpp src/cmsat-adapter.hpp)
 
-target_link_libraries(bonc-backend-sat PRIVATE bonc-midend-common sat-modeller)
+target_link_libraries(bonc-backend-sat PRIVATE bonc-midend-common sat-modeller Boost::program_options)
 
 target_compile_options(bonc-backend-sat PRIVATE
   $<$<CXX_COMPILER_ID:MSVC>:/W4>
-  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wshadow=compatible-local>
 )
 
 option(USE_CRYPTOMINISAT5 "Link with cryptominisat5" ON)

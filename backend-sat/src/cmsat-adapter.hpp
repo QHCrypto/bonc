@@ -1,10 +1,9 @@
 #pragma once
 
-#ifndef USE_CRYPTOMINISAT5
-#error "cryptominisat5 is not enabled"
+#ifdef USE_CRYPTOMINISAT5
+#include <cryptominisat5/cryptominisat.h>
 #endif
 
-#include <cryptominisat5/cryptominisat.h>
 #include <sat-modeller.h>
 
 namespace bonc {
@@ -25,6 +24,7 @@ inline std::ostream& operator<<(std::ostream& os, SolvedModelValue val) {
   }
   return os;
 }
+#ifdef USE_CRYPTOMINISAT5
 
 std::optional<std::vector<SolvedModelValue>> solve(
     const bonc::sat_modeller::SATModel& model) {
@@ -40,15 +40,22 @@ std::optional<std::vector<SolvedModelValue>> solve(
   }
   auto ret = solver.solve();
   if (ret == CMSat::l_True) {
-    std::cout << "SATISFIABLE" << std::endl;
     return solver.get_model() | std::views::transform([](auto lit) {
              return static_cast<SolvedModelValue>(lit.getValue());
            })
          | std::ranges::to<std::vector>();
   } else {
-    std::cout << "UNSATISFIABLE" << std::endl;
     return std::nullopt;
   }
 }
+
+#else
+
+std::optional<std::vector<SolvedModelValue>> solve(
+    const bonc::sat_modeller::SATModel& model) {
+  throw new std::runtime_error("cryptominisat5 is not enabled");
+}
+
+#endif
 
 }  // namespace bonc

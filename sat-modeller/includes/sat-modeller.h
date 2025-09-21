@@ -7,6 +7,7 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <functional>
 
 #include "table-template.h"
 
@@ -85,7 +86,7 @@ struct std::hash<bonc::sat_modeller::Literal> {
 
 namespace bonc::sat_modeller {
 
-using RawTable = std::vector<std::vector<std::uint64_t>>;
+using RawTable = std::vector<std::vector<int>>;
 
 class SATModel {
 public:
@@ -102,13 +103,15 @@ public:
   std::vector<Variable> createVariables(std::size_t count,
                                         const std::string& name_prefix = "");
   void addClause(const std::vector<Literal>& lits);
-  static TableTemplate buildTableTemplate(const RawTable& table);
+  using GetWeightFunction = std::function<std::size_t(int)>;
+  static TableTemplate buildTableTemplate(const RawTable& table, GetWeightFunction weight_fn);
   std::vector<Variable> addWeightTableClauses(
       const TableTemplate& table, const std::vector<Variable>& inputs,
       const std::vector<Variable>& outputs);
   void addXorClause(const std::vector<Variable>& values, Variable result);
   void addAndClause(const std::vector<Variable>& values, Variable result);
   void addOrClause(const std::vector<Variable>& values, Variable result);
+  void addEquivalentClause(const std::vector<Variable>& values);
   void addSequentialCounterLessEqualClause(std::vector<Variable> x, int k);
   void printLiteral(std::ostream& os, Literal lit, bool print_name) const;
   void print(std::ostream& os, bool print_names = true) const;

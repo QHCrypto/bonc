@@ -33,8 +33,9 @@ public:
 
   boost::dynamic_bitset<> getANFRepresentation(std::uint64_t index) const;
 
-  using DDT = std::vector<std::vector<std::uint64_t>>;
-  const DDT& getDDT() const;
+  using DistributionTable = std::vector<std::vector<int>>;
+  const DistributionTable& getDDT() const;
+  const DistributionTable& getLAT() const;
 
   ~LookupTable();
 };

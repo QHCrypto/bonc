@@ -6,6 +6,10 @@
 #include <fstream>
 #include <print>
 
+#ifdef USE_CRYPTOMINISAT5
+#include "cmsat-adapter.hpp"
+#endif
+
 struct SBoxInputBlock {
   std::vector<bonc::Ref<bonc::BitExpr>> inputs;
   bonc::Ref<bonc::LookupTable> table;
@@ -14,7 +18,7 @@ struct SBoxInputBlock {
                          const SBoxInputBlock& rhs) = default;
 
   friend std::size_t hash_value(const SBoxInputBlock& block) {
-    std::size_t seed = 0;
+    auto seed = 0uz;
     for (const auto& input : block.inputs) {
       boost::hash_combine(seed, input);
     }
@@ -23,11 +27,18 @@ struct SBoxInputBlock {
   }
 };
 
-struct DifferentialSATModeller {
+class Modeller {
+public:
+  enum class ModellingType { DDT, LAT };
+
+  const ModellingType type;
   bonc::sat_modeller::SATModel model;
   const bonc::sat_modeller::Variable FALSE;
+
+private:
   std::unordered_set<bonc::sat_modeller::Variable> weight_vars;
   std::unordered_set<bonc::sat_modeller::Variable> input_vars;
+  std::unordered_set<std::string> input_names;
 
   bonc::Ref<bonc::LookupTable> AND_TABLE;
   bonc::Ref<bonc::LookupTable> OR_TABLE;
@@ -40,21 +51,40 @@ struct DifferentialSATModeller {
   std::unordered_map<SBoxInputBlock, std::vector<bonc::sat_modeller::Variable>>
       modelled_sbox_inputs;
 
-  DifferentialSATModeller() : model{}, FALSE{model.createVariable("FALSE")} {
+public:
+  explicit Modeller(ModellingType type)
+      : type{type}, model{}, FALSE{model.createVariable("FALSE")} {
     model.addClause({-FALSE});
     AND_TABLE = bonc::LookupTable::create("AND", 2, 1, {0, 0, 0, 1});
     OR_TABLE = bonc::LookupTable::create("OR", 2, 1, {0, 1, 1, 1});
   }
+
+  void addInputNames(std::span<std::string> names) {
+    input_names.insert_range(names);
+  }
+
+private:
   const bonc::sat_modeller::TableTemplate* buildTableTemplate(
       const bonc::LookupTable* lookup) {
+    using namespace bonc::sat_modeller;
     assert(lookup);
     if (auto it = known_templates.find(lookup); it != known_templates.end()) {
       return it->second.get();
     }
-    auto& table = lookup->getDDT();
-    auto template_ = model.buildTableTemplate(table);
-    auto template_ptr = std::make_unique<bonc::sat_modeller::TableTemplate>(
-        std::move(template_));
+    auto& table =
+        type == ModellingType::DDT ? lookup->getDDT() : lookup->getLAT();
+    auto input_width = lookup->getInputWidth();
+    SATModel::GetWeightFunction ddt_weight_fn =
+        [input_width](int x) -> std::size_t {
+      return input_width - int(std::log2(x));
+    };
+    SATModel::GetWeightFunction lat_weight_fn =
+        [input_width](int x) -> std::size_t {
+      return input_width - int(std::log2(std::abs(x))) - 1;
+    };
+    auto weight_fn = type == ModellingType::DDT ? ddt_weight_fn : lat_weight_fn;
+    auto template_ = model.buildTableTemplate(table, std::move(weight_fn));
+    auto template_ptr = std::make_unique<TableTemplate>(std::move(template_));
     auto raw_ptr = template_ptr.get();
     known_templates.emplace(lookup, std::move(template_ptr));
     return raw_ptr;
@@ -70,9 +100,8 @@ struct DifferentialSATModeller {
       auto [inputs, table] = block;
       std::vector<bonc::sat_modeller::Variable> input_vars;
       input_vars.reserve(inputs.size());
-      for (const auto& input : inputs) {
-        input_vars.push_back(traverse(input));
-      }
+      std::ranges::transform(inputs, std::back_inserter(input_vars),
+                             std::bind_front(&Modeller::traverse, this));
       output_vars = model.createVariables(
           table->getOutputWidth(), std::format("{}_o", table->getName()));
 
@@ -93,7 +122,11 @@ struct DifferentialSATModeller {
   bonc::sat_modeller::Variable traverse_impl(bonc::Ref<bonc::BitExpr> expr) {
     switch (expr->getKind()) {
       case bonc::BitExpr::Constant: {
-        return FALSE;
+        if (this->type == ModellingType::DDT) {
+          return FALSE;
+        } else {
+          return model.createVariable("const");
+        }
       }
       case bonc::BitExpr::Read: {
         auto read_expr = boost::static_pointer_cast<bonc::ReadBitExpr>(expr);
@@ -101,9 +134,13 @@ struct DifferentialSATModeller {
         auto offset = read_expr->getOffset();
         auto name = target->getName();
         if (target->getKind() == bonc::ReadTarget::Input) {
-          if (name == "plaintext") {
-            auto input = model.createVariable("iv_" + std::to_string(offset));
-            input_vars.insert(input);
+          bool is_input_bit = this->input_names.contains(name);
+          if (this->type == ModellingType::LAT || is_input_bit) {
+            auto input =
+                model.createVariable(std::format("input_{}_{}", name, offset));
+            if (is_input_bit) {
+              this->input_vars.insert(input);
+            }
             return input;
           } else {
             return FALSE;
@@ -120,7 +157,7 @@ struct DifferentialSATModeller {
             lookup_expr->getOutputOffset());
       }
       case bonc::BitExpr::Not: {
-        // NOT 不改变差分传播
+        // NOT 不改变差分传播/线性掩码
         auto not_expr = boost::static_pointer_cast<bonc::NotBitExpr>(expr);
         return traverse(not_expr->getExpr());
       }
@@ -141,15 +178,21 @@ struct DifferentialSATModeller {
         auto xor_expr = boost::static_pointer_cast<bonc::BinaryBitExpr>(expr);
         auto left = traverse(xor_expr->getLeft());
         auto right = traverse(xor_expr->getRight());
-        if (left == FALSE) {
-          return right;
-        }
-        if (right == FALSE) {
+        if (this->type == ModellingType::DDT) {
+          if (left == FALSE) {
+            return right;
+          }
+          if (right == FALSE) {
+            return left;
+          }
+          auto result = model.createVariable("xor");
+          model.addXorClause({left, right}, result);
+          return result;
+        } else {
+          // 线性传播过 XOR 要求两侧掩码相同
+          model.addEquivalentClause({left, right});
           return left;
         }
-        auto result = model.createVariable("xor");
-        model.addXorClause({left, right}, result);
-        return result;
       }
       default: {
         throw std::runtime_error("Unknown BitExpr kind");
@@ -157,6 +200,7 @@ struct DifferentialSATModeller {
     }
   }
 
+public:
   bonc::sat_modeller::Variable traverse(bonc::Ref<bonc::BitExpr> expr) {
     auto expr_raw = expr.get();
     if (auto it = modelled_exprs.find(expr_raw); it != modelled_exprs.end()) {
@@ -167,12 +211,38 @@ struct DifferentialSATModeller {
     return variable;
   }
 
+  void complete() {
+    std::cerr << this->input_vars.size() << '\n';
+    // for (auto i : input_vars) {
+    //   std::cerr << this->model.getVariableDetail(i.getIndex()).name << '\n';
+    // }
+    if (this->type == ModellingType::DDT) {
+      this->setWeightLessThen(this->input_vars.size());
+    } else {
+      this->setWeightLessThen(this->input_vars.size() / 2);
+    }
+    this->assureInputNotEmpty();
+  }
+
+#ifdef USE_CRYPTOMINISAT5
+  void debugSolution(const std::vector<bonc::SolvedModelValue>& values) const {
+    for (auto& [expr, var] : modelled_exprs) {
+      std::cout << values.at(var.getIndex()) << " | ";
+      std::cout << std::setw(20) << model.getVariableDetail(var.getIndex()).name
+                << " | ";
+      expr->print(std::cout);
+      std::cout << "\n";
+    }
+  }
+#endif
+
+private:
   void setWeightLessThen(int k) {
     assert(k > 0);
     model.addSequentialCounterLessEqualClause(
         std::vector(std::from_range, weight_vars), k);
   }
-  void assureInputDifferential() {
+  void assureInputNotEmpty() {
     if (input_vars.empty()) {
       return;
     }
@@ -182,8 +252,6 @@ struct DifferentialSATModeller {
   }
 };
 
-#include "cmsat-adapter.hpp"
-
 int test_sbox_modelling() {
   bonc::sat_modeller::SATModel model;
   auto TRUE = model.createVariable("TRUE");
@@ -191,73 +259,125 @@ int test_sbox_modelling() {
   model.addClause({TRUE});
   model.addClause({-FALSE});
 
+  auto a = model.createVariable("a");
+  auto b = model.createVariable("b");
+  model.addEquivalentClause({a, b});
+  model.print(std::cout, true);
+
   auto table =
       bonc::LookupTable::create("test", 4, 4,
                                 {0xE, 0x4, 0xD, 0x1, 0x2, 0xF, 0xB, 0x8, 0x3,
                                  0xA, 0x6, 0xC, 0x5, 0x9, 0x0, 0x7});
-  auto ddt = table->getDDT();
+  auto ddt = table->getLAT();
   for (const auto& row : ddt) {
     for (const auto& col : row) {
-      std::print("{} ", col);
+      std::print("{:>2} ", col);
     }
     std::println();
   }
-  auto template_ = model.buildTableTemplate(ddt);
-  auto output_vars = model.createVariables(4, "outputs");
-  auto weight_vars = model.addWeightTableClauses(
-      template_, {FALSE, FALSE, FALSE, TRUE}, output_vars);
-  auto assignments = bonc::solve(model);
-  if (!assignments) {
-    return 1;
-  }
+  // auto template_ = model.buildTableTemplate(ddt);
+  // auto output_vars = model.createVariables(4, "outputs");
+  // auto weight_vars = model.addWeightTableClauses(
+  //     template_, {FALSE, FALSE, FALSE, TRUE}, output_vars);
+  // auto assignments = bonc::solve(model);
+  // if (!assignments) {
+  //   return 1;
+  // }
 
-  for (auto i = 0uz; i < assignments->size(); i++) {
-    std::cout << model.getVariableDetail(i).name << " = " << assignments->at(i)
-              << '\n';
-  }
+  // for (auto i = 0uz; i < assignments->size(); i++) {
+  //   std::cout << model.getVariableDetail(i).name << " = " <<
+  //   assignments->at(i)
+  //             << '\n';
+  // }
 
   return 0;
 }
 
 // #define main main2
 
+#include <boost/program_options.hpp>
+
+namespace po = boost::program_options;
+
 int main(int argc, char** argv) {
-  assert(argc >= 2);
-  std::ifstream ifs(argv[1]);
+  bool is_differential = false;
+  bool is_linear = false;
+  bool solve = false;
+
+  po::options_description desc("Allowed options");
+  // clang-format off
+  desc.add_options()
+    ("help", "Print help message")
+    ("input", po::value<std::string>()->required(), "Input file containing the frontend result in JSON format")
+    ("differential,d", po::bool_switch(&is_differential), "Construct differential propagation model")
+    ("linear,l", po::bool_switch(&is_linear), "Construct linear propagation model")
+    ("input-bits,I", po::value<std::string>()->default_value(""), "BONC Input bits' name, format \"name1,name2...\"")
+    ("output", po::value<std::string>(), "Output file to write the model in DIMACS format")
+    ("solve", po::bool_switch(&solve), "Solve the model using cryptominisat5")
+  ;
+  // clang-format on
+
+  po::positional_options_description p;
+  p.add("input", -1);
+
+  po::variables_map vm;
+  po::store(
+      po::command_line_parser(argc, argv).options(desc).positional(p).run(),
+      vm);
+  po::notify(vm);
+
+  if (vm.count("help")) {
+    std::cout << desc << '\n';
+    return 0;
+  }
+
+  std::string input_file = vm["input"].as<std::string>();
+
+  std::ifstream ifs(input_file);
   bonc::FrontendResultParser parser(ifs);
 
-  DifferentialSATModeller modeller;
+  if (is_differential == is_linear) {
+    throw std::runtime_error(
+        "Cannot specify both --differential and --linear nor none of each");
+  }
+  auto modelling_type =
+      is_linear ? Modeller::ModellingType::LAT : Modeller::ModellingType::DDT;
+
+  Modeller modeller(modelling_type);
+
+  std::vector<std::string> input_names;
+  boost::split(input_names, vm["input-bits"].as<std::string>(),
+               boost::is_any_of(","));
+  if (input_names.size() == 0) {
+    throw std::runtime_error(
+        "You should at least specify one input name in --input-bits");
+  }
+  modeller.addInputNames(input_names);
+
   for (auto& info : parser.parseAll()) {
     std::cout << "Output: " << info.name << ", Size: " << info.size << "\n";
     for (auto& expr : info.expressions) {
       modeller.traverse(expr);
     }
   }
-  modeller.assureInputDifferential();
-  modeller.setWeightLessThen(63);
-  // std::cout << modeller.modelled_sbox_inputs.size() << '\n';
-  // for (auto [key, _] : modeller.modelled_sbox_inputs) {
-  //   auto [inputs, table] = key;
-  //   inputs.at(0)->print(std::cout);
-  //   std::cout << '\n';
-  // }
+  modeller.complete();
 
-  auto values = bonc::solve(modeller.model);
-
-  if (!values) {
-    return 1;
+  if (vm.count("output")) {
+    auto out_file = vm["output"].as<std::string>();
+    std::ofstream ofs(out_file);
+    modeller.model.printDIMACS(ofs);
   }
 
-  for (auto& [expr, var] : modeller.modelled_exprs) {
-    std::cout << values->at(var.getIndex()) << " | ";
-    std::cout << std::setw(20) << modeller.model.getVariableDetail(var.getIndex()).name
-              << " | ";
-    expr->print(std::cout);
-    std::cout << "\n";
+  if (solve) {
+    auto values = bonc::solve(modeller.model);
+    if (!values) {
+      std::cout << "c UNSATISFIABLE\n";
+      return 1;
+    }
+    std::cout << "c SATISFIABLE\n v ";
+    for (const auto& value : *values) {
+      std::cout << value << " ";
+    }
+    std::cout << std::endl;
   }
-
-  // std::ofstream out("out.cnf");
-  // modeller.model.printDIMACS(out);
-
-  // modeller.model.print(std::cout, true);
 }

@@ -1,5 +1,6 @@
 #include "sat-modeller.h"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <format>
@@ -29,14 +30,11 @@ void SATModel::addClause(const std::vector<Literal>& lits) {
   clauses.push_back({lits});
 }
 
-TableTemplate SATModel::buildTableTemplate(const RawTable& table) {
+TableTemplate SATModel::buildTableTemplate(const RawTable& table, SATModel::GetWeightFunction weight_fn) {
   assert(table.size() > 1 && table.at(0).size() > 1);
   auto input_width = std::bit_width(table.size() - 1);
   auto output_width = std::bit_width(table.at(0).size() - 1);
 
-  auto get_weight = [input_width](std::uint64_t x) {
-    return input_width - int(std::log2(x));
-  };
   std::string espresso_input;
   espresso_input +=
       std::format(".i {}\n.o 1\n", input_width + 2 * output_width);
@@ -47,7 +45,7 @@ TableTemplate SATModel::buildTableTemplate(const RawTable& table) {
       if (val) {
         std::string input_bitvec = std::format("{:0{}b}", i, input_width);
         std::string output_bitvec = std::format("{:0{}b}", j, output_width);
-        auto weight = get_weight(val);
+        auto weight = weight_fn(val);
         std::string weight_vec = std::format("{:0>{}}{:1>{}}", "",
                                              output_width - weight, "", weight);
         espresso_input +=
@@ -143,6 +141,15 @@ void SATModel::addOrClause(const std::vector<Variable>& values,
   }
   clause.push_back(-result);
   addClause(clause);
+}
+
+void SATModel::addEquivalentClause(const std::vector<Variable>& values) {
+  std::vector<Variable> rotated_values;
+  rotated_values.reserve(values.size());
+  std::ranges::rotate_copy(values, values.begin() + 1, std::back_inserter(rotated_values));
+  for (auto i = 0uz; i < values.size(); i++) {
+    addClause({-values.at(i), rotated_values.at(i)});
+  }
 }
 
 void SATModel::addSequentialCounterLessEqualClause(std::vector<Variable> x,
