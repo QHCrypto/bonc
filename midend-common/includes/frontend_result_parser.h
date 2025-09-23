@@ -16,8 +16,13 @@ namespace bonc {
 
 struct OutputInfo {
   std::string name;
-  unsigned size;
+  std::size_t size;
   std::vector<Ref<BitExpr>> expressions;
+};
+
+struct FrontendResult {
+  std::vector<Ref<ReadTarget>> iterations;
+  std::vector<OutputInfo> outputs;
 };
 
 class ExprStoreHash {
@@ -53,7 +58,7 @@ public:
     return boost::static_pointer_cast<T>(*it);
   }
 
-  std::vector<OutputInfo> parseAll();
+  FrontendResult parseAll();
 
   Ref<ReadTarget> getReadTarget(const std::string& name) const;
   Ref<LookupTable> getLookupTable(const std::string& name) const;

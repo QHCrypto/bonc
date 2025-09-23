@@ -2,7 +2,8 @@
 #include <sat-modeller.h>
 #include <table-template.h>
 
-#include <boost/process.hpp>
+#include <boost/regex.hpp>
+#include <boost/algorithm/string.hpp>
 #include <fstream>
 #include <print>
 
@@ -61,6 +62,15 @@ public:
 
   void addInputNames(std::span<std::string> names) {
     input_names.insert_range(names);
+  }
+
+  bonc::sat_modeller::Literal::ValueT getExprIndex(
+      bonc::Ref<bonc::BitExpr> expr) {
+    if (auto it = modelled_exprs.find(expr.get()); it != modelled_exprs.end()) {
+      return it->second.getIndex();
+    } else {
+      return -1;
+    }
   }
 
 private:
@@ -252,6 +262,24 @@ private:
   }
 };
 
+void printStateValue(std::vector<bonc::SolvedModelValue> values) {
+  unsigned short value = 0;  // per 4 bits
+  for (auto i = 0uz; i < values.size(); i++) {
+    if (values.at(i) == bonc::SolvedModelValue::True) {
+      value |= (1 << (i % 4));
+    }
+    if (i % 4 == 3) {
+      if (value) {
+        std::print("{:x}", value);
+        value = 0;
+      } else {
+        std::print("-");
+      }
+    }
+  }
+  std::println("");
+}
+
 int test_sbox_modelling() {
   bonc::sat_modeller::SATModel model;
   auto TRUE = model.createVariable("TRUE");
@@ -314,6 +342,7 @@ int main(int argc, char** argv) {
     ("input-bits,I", po::value<std::string>()->default_value(""), "BONC Input bits' name, format \"name1,name2...\"")
     ("output", po::value<std::string>(), "Output file to write the model in DIMACS format")
     ("solve", po::bool_switch(&solve), "Solve the model using cryptominisat5")
+    ("print-states", po::value<std::string>()->default_value(".*"), "A regex pattern to filter state variable solutions to print")
   ;
   // clang-format on
 
@@ -354,7 +383,8 @@ int main(int argc, char** argv) {
   }
   modeller.addInputNames(input_names);
 
-  for (auto& info : parser.parseAll()) {
+  auto [iterations, outputs] = parser.parseAll();
+  for (auto& info : outputs) {
     std::cout << "Output: " << info.name << ", Size: " << info.size << "\n";
     for (auto& expr : info.expressions) {
       modeller.traverse(expr);
@@ -371,13 +401,29 @@ int main(int argc, char** argv) {
   if (solve) {
     auto values = bonc::solve(modeller.model);
     if (!values) {
-      std::cout << "c UNSATISFIABLE\n";
+      std::println("UNSATISFIABLE");
       return 1;
     }
-    std::cout << "c SATISFIABLE\n v ";
-    for (const auto& value : *values) {
-      std::cout << value << " ";
+    std::println("SATISFIABLE");
+
+    auto state_name_regex = boost::regex(vm["print-states"].as<std::string>());
+
+    for (auto& target : iterations) {
+      auto& name = target->getName();
+      if (!boost::regex_match(name, state_name_regex)) {
+        continue;
+      }
+      std::println("State {}: ", name);
+      std::vector<bonc::SolvedModelValue> state_values;
+      for (auto& expr : target->update_expressions) {
+        auto var_index = modeller.getExprIndex(expr);
+        if (var_index <= 0) {
+          state_values.push_back(bonc::SolvedModelValue::Undefined);
+          continue;
+        }
+        state_values.push_back(values->at(var_index));
+      }
+      printStateValue(state_values);
     }
-    std::cout << std::endl;
   }
 }

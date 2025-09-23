@@ -16,7 +16,7 @@ FrontendResultParser::FrontendResultParser(std::istream& json_content) {
   value = nlohmann::json::parse(json_content);
 }
 
-std::vector<OutputInfo> FrontendResultParser::parseAll() {
+FrontendResult FrontendResultParser::parseAll() {
   // Parse inputs
   for (const auto& input : value.at("inputs")) {
     auto name = input.at("name").get<std::string>();
@@ -36,6 +36,7 @@ std::vector<OutputInfo> FrontendResultParser::parseAll() {
   }
 
   // Parse iterations
+  std::vector<Ref<ReadTarget>> iterations;
   for (const auto& iteration : value.at("iterations")) {
     auto name = iteration.at("name").get<std::string>();
     auto size = iteration.at("size").get<std::size_t>();
@@ -48,9 +49,10 @@ std::vector<OutputInfo> FrontendResultParser::parseAll() {
     }
 
     read_targets["state:" + name] = target;
+    iterations.push_back(std::move(target));
   }
-  std::vector<OutputInfo> outputs;
 
+  std::vector<OutputInfo> outputs;
   for (const auto& output : value.at("outputs")) {
     OutputInfo info;
     info.name = output.at("name").get<std::string>();
@@ -61,7 +63,7 @@ std::vector<OutputInfo> FrontendResultParser::parseAll() {
     outputs.push_back(info);
   }
 
-  return outputs;
+  return {.iterations = std::move(iterations), .outputs = std::move(outputs)};
 }
 
 Ref<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,

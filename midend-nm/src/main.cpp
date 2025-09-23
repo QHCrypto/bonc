@@ -60,8 +60,10 @@ int main(int argc, char** argv) {
   }
   setInputDegree(std::move(input_degree_map), default_input_degree);
 
+  auto [iterations, outputs] = parser.parseAll();
+
   std::vector<Polynomial> output_polys;
-  for (auto& info : parser.parseAll()) {
+  for (auto& info : outputs) {
     std::cout << "Output: " << info.name << ", Size: " << info.size << "\n";
     for (auto& expr : info.expressions) {
       output_polys.push_back(bitExprToANF(expr));
