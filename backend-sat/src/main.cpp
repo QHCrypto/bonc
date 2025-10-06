@@ -73,6 +73,10 @@ public:
     }
   }
 
+  const auto& getWeightVars() const {
+    return weight_vars;
+  }
+
 private:
   const bonc::sat_modeller::TableTemplate* buildTableTemplate(
       const bonc::LookupTable* lookup) {
@@ -405,6 +409,15 @@ int main(int argc, char** argv) {
       return 1;
     }
     std::println("SATISFIABLE");
+
+    std::size_t weight = 0;
+    for (auto var : modeller.getWeightVars()) {
+      auto var_index = var.getIndex();
+      if (values->at(var_index) == bonc::SolvedModelValue::True) {
+        weight++;
+      }
+    }
+    std::println("{}: 2^-{}", is_differential ? "Probability" : "Correlation", weight);
 
     auto state_name_regex = boost::regex(vm["print-states"].as<std::string>());
 
