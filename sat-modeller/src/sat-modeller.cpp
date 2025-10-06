@@ -155,6 +155,7 @@ void SATModel::addEquivalentClause(const std::vector<Variable>& values) {
 void SATModel::addSequentialCounterLessEqualClause(std::vector<Variable> x,
                                                    int k) {
   auto n = x.size();
+  assert(n >= 2);
   std::vector<std::vector<Variable>> s;
   for (auto i = 0uz; i < n - 1; i++) {
     s.push_back(createVariables(k, std::format("seq_cnt_s_{}", i)));
@@ -174,7 +175,7 @@ void SATModel::addSequentialCounterLessEqualClause(std::vector<Variable> x,
     }
     addClause({-x.at(i), -s.at(i - 1).at(k - 1)});
   }
-  addClause({-x.at(n - 1), s.at(n - 2).at(k - 1)});
+  addClause({-x.at(n - 1), -s.at(n - 2).at(k - 1)});
 }
 
 void SATModel::printLiteral(std::ostream& os, Literal lit,

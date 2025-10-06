@@ -2,8 +2,8 @@
 #include <sat-modeller.h>
 #include <table-template.h>
 
-#include <boost/regex.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/regex.hpp>
 #include <fstream>
 #include <print>
 
@@ -225,16 +225,15 @@ public:
     return variable;
   }
 
-  void complete() {
+  void complete(std::optional<std::size_t> max_weight = std::nullopt) {
     std::cerr << this->input_vars.size() << '\n';
     // for (auto i : input_vars) {
     //   std::cerr << this->model.getVariableDetail(i.getIndex()).name << '\n';
     // }
-    if (this->type == ModellingType::DDT) {
-      this->setWeightLessThen(this->input_vars.size());
-    } else {
-      this->setWeightLessThen(this->input_vars.size() / 2);
-    }
+    this->setWeightLessThen(max_weight ? *max_weight
+                                       : (this->type == ModellingType::DDT
+                                              ? this->input_vars.size()
+                                              : this->input_vars.size() / 2));
     this->assureInputNotEmpty();
   }
 
@@ -344,6 +343,7 @@ int main(int argc, char** argv) {
     ("differential,d", po::bool_switch(&is_differential), "Construct differential propagation model")
     ("linear,l", po::bool_switch(&is_linear), "Construct linear propagation model")
     ("input-bits,I", po::value<std::string>()->default_value(""), "BONC Input bits' name, format \"name1,name2...\"")
+    ("max-weight,w", po::value<int>(), "Max weight (probability or correlation) allowed; defaults to input size / 2 for linear, input size for differential")
     ("output", po::value<std::string>(), "Output file to write the model in DIMACS format")
     ("solve", po::bool_switch(&solve), "Solve the model using cryptominisat5")
     ("print-states", po::value<std::string>()->default_value(".*"), "A regex pattern to filter state variable solutions to print")
@@ -394,7 +394,14 @@ int main(int argc, char** argv) {
       modeller.traverse(expr);
     }
   }
-  modeller.complete();
+  std::optional<std::size_t> max_weight;
+  if (vm.count("max-weight")) {
+    max_weight = vm["max-weight"].as<int>();
+    if (max_weight <= 0) {
+      throw std::runtime_error("--max-weight must be positive");
+    }
+  }
+  modeller.complete(max_weight);
 
   if (vm.count("output")) {
     auto out_file = vm["output"].as<std::string>();
@@ -417,7 +424,8 @@ int main(int argc, char** argv) {
         weight++;
       }
     }
-    std::println("{}: 2^-{}", is_differential ? "Probability" : "Correlation", weight);
+    std::println("{}: 2^-{}", is_differential ? "Probability" : "Correlation",
+                 weight);
 
     auto state_name_regex = boost::regex(vm["print-states"].as<std::string>());
 
