@@ -1,0 +1,27 @@
+╰─ /home/guyutongxue/Documents/files/2025.4/bonc/build/bin/bonc-backend-sat --differential ../../2025.1/se_test/romulus-d/bonc_round7.json --input-bits=iv --solve --print-state='iv|\d/0'
+Output: state, Size: 16
+128
+SATISFIABLE
+Probability: 2^-127
+State iv: 
+2-----a---------1a-1-1-1--------
+State 0/0: 
+--------------------------------
+State 1/0: 
+--------------------------------
+State 2/0: 
+--------------------------------
+State 3/0: 
+--------------------------------
+State 4/0: 
+--------------------------------
+State 5/0: 
+--------------------------------
+State 6/0: 
+--------------------------------
+State 7/0: 
+2-----a-2-----a---------2-----a-
+State 8/0: 
+----22------24-2------------24-2
+State 9/0: 
+---14-------4a---------3----4a--

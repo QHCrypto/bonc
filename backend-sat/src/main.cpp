@@ -327,6 +327,7 @@ int test_sbox_modelling() {
 // #define main main2
 
 #include <boost/program_options.hpp>
+#include <ranges>
 
 namespace po = boost::program_options;
 
@@ -387,7 +388,7 @@ int main(int argc, char** argv) {
   }
   modeller.addInputNames(input_names);
 
-  auto [iterations, outputs] = parser.parseAll();
+  auto [inputs, iterations, outputs] = parser.parseAll();
   for (auto& info : outputs) {
     std::cout << "Output: " << info.name << ", Size: " << info.size << "\n";
     for (auto& expr : info.expressions) {
@@ -429,14 +430,15 @@ int main(int argc, char** argv) {
 
     auto state_name_regex = boost::regex(vm["print-states"].as<std::string>());
 
-    for (auto& target : iterations) {
+    for (bonc::Ref<bonc::ReadTarget>& target : std::views::concat(inputs, iterations)) {
       auto& name = target->getName();
       if (!boost::regex_match(name, state_name_regex)) {
         continue;
       }
       std::println("State {}: ", name);
       std::vector<bonc::SolvedModelValue> state_values;
-      for (auto& expr : target->update_expressions) {
+      for (auto index : std::views::iota(0uz, target->getSize() * CHAR_BIT)) {
+        auto expr = parser.createExpr<bonc::ReadBitExpr>(target, index);
         auto var_index = modeller.getExprIndex(expr);
         if (var_index <= 0) {
           state_values.push_back(bonc::SolvedModelValue::Undefined);

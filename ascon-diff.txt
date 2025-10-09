@@ -1,0 +1,11 @@
+╰─ /home/guyutongxue/Documents/files/2025.4/bonc/build/bin/bonc-backend-sat --differential ../../2025.1/se_test/ascon-d/bonc_init_round3.json --input-bits=iv --solve --print-state='.*'
+Output: state_after_init, Size: 40
+128
+SATISFIABLE
+Probability: 2^-56
+State 0/0: 
+------2-4----2-----------------------------------------------------1-------4-2--
+State 1/0: 
+---8---------2-2-8-9--214--46-8-----------------------------------------88---2--
+State 2/0: 
+-488-12-284--2-2-----5--8c4---8728ad84b-6-9752c-48996-3378d446-2-2---2-----4824-

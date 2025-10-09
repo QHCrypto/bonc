@@ -21,6 +21,7 @@ struct OutputInfo {
 };
 
 struct FrontendResult {
+  std::vector<Ref<ReadTarget>> inputs;
   std::vector<Ref<ReadTarget>> iterations;
   std::vector<OutputInfo> outputs;
 };

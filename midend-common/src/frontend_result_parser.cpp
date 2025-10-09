@@ -8,7 +8,8 @@ std::size_t ExprStoreHash::operator()(const Ref<BitExpr>& expr) const {
   return expr->hash_value();
 }
 
-bool ExprStoreEqual::operator()(const Ref<BitExpr>& lhs, const Ref<BitExpr>& rhs) const {
+bool ExprStoreEqual::operator()(const Ref<BitExpr>& lhs,
+                                const Ref<BitExpr>& rhs) const {
   return lhs->equals(*rhs);
 }
 
@@ -18,11 +19,13 @@ FrontendResultParser::FrontendResultParser(std::istream& json_content) {
 
 FrontendResult FrontendResultParser::parseAll() {
   // Parse inputs
+  std::vector<Ref<ReadTarget>> inputs;
   for (const auto& input : value.at("inputs")) {
     auto name = input.at("name").get<std::string>();
     auto size = input.at("size").get<std::size_t>();
-    read_targets["input:" + name] =
-        new ReadTarget(ReadTarget::Input, name, size);
+    Ref<ReadTarget> target = new ReadTarget(ReadTarget::Input, name, size);
+    read_targets["input:" + name] = target;
+    inputs.push_back(std::move(target));
   }
 
   // Parse components.sboxes
@@ -63,7 +66,9 @@ FrontendResult FrontendResultParser::parseAll() {
     outputs.push_back(info);
   }
 
-  return {.iterations = std::move(iterations), .outputs = std::move(outputs)};
+  return {.inputs = std::move(inputs),
+          .iterations = std::move(iterations),
+          .outputs = std::move(outputs)};
 }
 
 Ref<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,
@@ -89,7 +94,8 @@ Ref<BitExpr> BitExpr::fromJSON(const FrontendResultParser& parser,
       inputs.push_back(fromJSON(parser, input));
     }
     unsigned output_offset = j.at("output_offset").get<unsigned>();
-    return parser.createExpr<LookupBitExpr>(table, std::move(inputs), output_offset);
+    return parser.createExpr<LookupBitExpr>(table, std::move(inputs),
+                                            output_offset);
   } else if (type == "unary") {
     // Parse unary_expression
     auto op = j.at("operator").get<std::string>();
