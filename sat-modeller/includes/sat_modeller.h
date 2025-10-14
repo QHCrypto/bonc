@@ -9,7 +9,7 @@
 #include <vector>
 #include <functional>
 
-#include "table-template.h"
+#include "table_template.h"
 
 namespace bonc::sat_modeller {
 

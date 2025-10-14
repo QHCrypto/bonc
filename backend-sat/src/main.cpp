@@ -1,6 +1,7 @@
 #include <frontend_result_parser.h>
-#include <sat-modeller.h>
-#include <table-template.h>
+#include <sat_modeller.h>
+#include <sbox_and_input.h>
+#include <table_template.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/regex.hpp>
@@ -8,25 +9,8 @@
 #include <print>
 
 #ifdef USE_CRYPTOMINISAT5
-#include "cmsat-adapter.hpp"
+#include "cmsat_adapter.hpp"
 #endif
-
-struct SBoxInputBlock {
-  std::vector<bonc::Ref<bonc::BitExpr>> inputs;
-  bonc::Ref<bonc::LookupTable> table;
-
-  friend bool operator==(const SBoxInputBlock& lhs,
-                         const SBoxInputBlock& rhs) = default;
-
-  friend std::size_t hash_value(const SBoxInputBlock& block) {
-    auto seed = 0uz;
-    for (const auto& input : block.inputs) {
-      boost::hash_combine(seed, input);
-    }
-    boost::hash_combine(seed, block.table);
-    return seed;
-  }
-};
 
 class Modeller {
 public:
@@ -49,7 +33,8 @@ private:
       known_templates;
   std::unordered_map<const bonc::BitExpr*, bonc::sat_modeller::Variable>
       modelled_exprs;
-  std::unordered_map<SBoxInputBlock, std::vector<bonc::sat_modeller::Variable>>
+  std::unordered_map<bonc::SBoxInputBlock,
+                     std::vector<bonc::sat_modeller::Variable>>
       modelled_sbox_inputs;
 
 public:
@@ -104,8 +89,8 @@ private:
     return raw_ptr;
   }
 
-  bonc::sat_modeller::Variable generateFromLookupTable(SBoxInputBlock block,
-                                                       int output_offset) {
+  bonc::sat_modeller::Variable generateFromLookupTable(
+      bonc::SBoxInputBlock block, int output_offset) {
     std::vector<bonc::sat_modeller::Variable> output_vars;
     if (auto modelled_it = modelled_sbox_inputs.find(block);
         modelled_it != modelled_sbox_inputs.end()) {
@@ -167,7 +152,8 @@ private:
         auto lookup_expr =
             boost::static_pointer_cast<bonc::LookupBitExpr>(expr);
         return generateFromLookupTable(
-            SBoxInputBlock{lookup_expr->getInputs(), lookup_expr->getTable()},
+            bonc::SBoxInputBlock{lookup_expr->getInputs(),
+                                 lookup_expr->getTable()},
             lookup_expr->getOutputOffset());
       }
       case bonc::BitExpr::Not: {
@@ -178,14 +164,15 @@ private:
       case bonc::BitExpr::And: {
         auto and_expr = boost::static_pointer_cast<bonc::BinaryBitExpr>(expr);
         return generateFromLookupTable(
-            SBoxInputBlock{{and_expr->getLeft(), and_expr->getRight()},
-                           AND_TABLE},
+            bonc::SBoxInputBlock{{and_expr->getLeft(), and_expr->getRight()},
+                                 AND_TABLE},
             0);
       }
       case bonc::BitExpr::Or: {
         auto or_expr = boost::static_pointer_cast<bonc::BinaryBitExpr>(expr);
         return generateFromLookupTable(
-            SBoxInputBlock{{or_expr->getLeft(), or_expr->getRight()}, OR_TABLE},
+            bonc::SBoxInputBlock{{or_expr->getLeft(), or_expr->getRight()},
+                                 OR_TABLE},
             0);
       }
       case bonc::BitExpr::Xor: {
@@ -430,7 +417,8 @@ int main(int argc, char** argv) {
 
     auto state_name_regex = boost::regex(vm["print-states"].as<std::string>());
 
-    for (bonc::Ref<bonc::ReadTarget>& target : std::views::concat(inputs, iterations)) {
+    for (bonc::Ref<bonc::ReadTarget>& target :
+         std::views::concat(inputs, iterations)) {
       auto& name = target->getName();
       if (!boost::regex_match(name, state_name_regex)) {
         continue;

@@ -1,7 +1,8 @@
 
 add_library(bonc-midend-common
   src/frontend_result_parser.cpp
-  src/lookup_table.cpp)
+  src/lookup_table.cpp
+  src/sbox_and_input.cpp)
 
 find_package(Boost REQUIRED)
 find_package(nlohmann_json REQUIRED)

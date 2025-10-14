@@ -4,7 +4,7 @@
 #include <cryptominisat5/cryptominisat.h>
 #endif
 
-#include <sat-modeller.h>
+#include <sat_modeller.h>
 
 namespace bonc {
 

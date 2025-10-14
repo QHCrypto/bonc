@@ -60,7 +60,7 @@ int main(int argc, char** argv) {
   }
   setInputDegree(std::move(input_degree_map), default_input_degree);
 
-  auto [iterations, outputs] = parser.parseAll();
+  auto [_, iterations, outputs] = parser.parseAll();
 
   std::vector<Polynomial> output_polys;
   for (auto& info : outputs) {

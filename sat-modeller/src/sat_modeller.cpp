@@ -1,4 +1,4 @@
-#include "sat-modeller.h"
+#include "sat_modeller.h"
 
 #include <algorithm>
 #include <bit>
@@ -8,7 +8,7 @@
 #include <print>
 
 #include "combinations.hpp"
-#include "espresso-wrapper.h"
+#include "espresso_wrapper.h"
 
 namespace bonc::sat_modeller {
 
