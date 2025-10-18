@@ -1,6 +1,6 @@
 find_package(Boost REQUIRED COMPONENTS program_options regex)
 
-add_executable(bonc-backend-sat src/main.cpp src/cmsat-adapter.hpp)
+add_executable(bonc-backend-sat src/main.cpp src/cmsat_adapter.hpp)
 
 target_link_libraries(bonc-backend-sat PRIVATE bonc-midend-common sat-modeller Boost::program_options Boost::regex)
 

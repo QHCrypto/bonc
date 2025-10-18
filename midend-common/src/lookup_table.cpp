@@ -111,6 +111,14 @@ std::uint64_t LookupTable::getOutputWidth() const {
   return impl->output_width;
 }
 
+const std::vector<std::uint64_t>& LookupTable::tableData() const {
+  return impl->values;
+}
+
+std::size_t LookupTable::tableSize() const {
+  return impl->values.size();
+}
+
 boost::dynamic_bitset<> LookupTable::getANFRepresentation(
     std::uint64_t index) const {
   impl->genAnfBits();

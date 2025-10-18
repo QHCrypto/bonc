@@ -1,9 +1,12 @@
 #include <frontend_result_parser.h>
 #include <sbox_and_input.h>
 
+#include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
 #include <fstream>
 #include <print>
+
+#include "polyhedron.h"
 
 struct EnabledStreamableTypes : boost::program_options::options_description {};
 
@@ -36,6 +39,7 @@ struct Overload : F... {
 #include "traverse-result.hpp"
 
 class DivisionPropertyModeller {
+  std::unordered_set<std::string> input_names;
   std::unordered_map<const bonc::BitExpr*, bonc::dp::TraverseResult> traversed;
   std::unordered_map<bonc::SBoxInputBlock,
                      std::vector<bonc::dp::TraverseResult>>
@@ -61,6 +65,9 @@ class DivisionPropertyModeller {
         auto [target, offset] =
             boost::static_pointer_cast<bonc::ReadBitExpr>(expr)
                 ->getTargetAndOffset();
+        if (target->getKind() == bonc::ReadTarget::Input) {
+          return Um::Unspecified; // TODO
+        }
         return traverse(target->update_expressions.at(offset));
       }
       case bonc::BitExpr::Lookup: {
@@ -74,9 +81,20 @@ class DivisionPropertyModeller {
             it != this->traversed_sbox_inputs.end()) {
           outputs = it->second;
         } else {
+          std::vector<R> inputs;
           for (auto& input : lookup_expr->getInputs()) {
-            outputs.push_back(traverse(input));
+            inputs.push_back(traverse(input));
           }
+          int sbox_degree = 0;
+          for (auto i = 0u; i < sbox->getOutputWidth(); i++) {
+            auto anf = lookup_expr->getTable()->getANFRepresentation(i);
+            auto max_term = *std::ranges::max_element(
+                std::views::iota(0uz, anf.size()), {},
+                [&anf](size_t index) -> int { return index * +anf.test(index); });
+            auto degree = std::popcount(max_term);
+            sbox_degree = std::max(sbox_degree, degree);
+          }
+          // TODO
         }
         return outputs.at(lookup_expr->getOutputOffset());
       }
@@ -152,6 +170,12 @@ class DivisionPropertyModeller {
   }
 
 public:
+  DivisionPropertyModeller() = default;
+
+  void addInputNames(std::span<std::string> names) {
+    input_names.insert_range(names);
+  }
+
   bonc::dp::TraverseResult traverse(bonc::Ref<bonc::BitExpr> expr) {
     auto result = traverseImpl(expr);
     auto [it, suc] = traversed.insert({expr.get(), result});
@@ -159,6 +183,8 @@ public:
     return result;
   }
 };
+
+#define main main2
 
 int main(int argc, char** argv) {
   namespace po = boost::program_options;
@@ -193,6 +219,15 @@ int main(int argc, char** argv) {
   auto [_, _, outputs] = parser.parseAll();
 
   auto modeller = DivisionPropertyModeller{};
+  std::vector<std::string> input_names;
+  boost::split(input_names, vm["input-bits"].as<std::string>(),
+               boost::is_any_of(","));
+  if (input_names.size() == 0) {
+    throw std::runtime_error(
+        "You should at least specify one input name in --input-bits");
+  }
+  modeller.addInputNames(input_names);
+
   for (auto& [name, size, expressions] : outputs) {
     std::println("Output: {}, Size: {}", name, size);
     for (auto& expr : expressions) {

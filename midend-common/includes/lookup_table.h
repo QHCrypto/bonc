@@ -30,6 +30,8 @@ public:
   const std::string& getName() const;
   std::uint64_t getInputWidth() const;
   std::uint64_t getOutputWidth() const;
+  const std::vector<std::uint64_t>& tableData() const;
+  std::size_t tableSize() const;
 
   boost::dynamic_bitset<> getANFRepresentation(std::uint64_t index) const;
 

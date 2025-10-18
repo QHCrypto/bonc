@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.30)
 
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules" ${CMAKE_MODULE_PATH})
+
 project(bonc)
 
 set(CMAKE_CXX_STANDARD 26)
@@ -12,6 +14,7 @@ endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 add_subdirectory(espresso)
+add_subdirectory(ppl)
 add_subdirectory(sat-modeller)
 
 add_subdirectory(midend-common)
