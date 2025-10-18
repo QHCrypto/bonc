@@ -6,7 +6,7 @@
 #include <fstream>
 #include <print>
 
-#include "polyhedron.h"
+#include "sbox_modelling.h"
 
 struct EnabledStreamableTypes : boost::program_options::options_description {};
 
@@ -47,10 +47,6 @@ class DivisionPropertyModeller {
   bonc::dp::MILPModel model;
 
   bonc::dp::TraverseResult traverseImpl(bonc::Ref<bonc::BitExpr> expr) {
-    if (auto it = traversed.find(expr.get()); it != traversed.end()) {
-      auto v = it->second;
-      return it->second.reuse(model);
-    }
     using Um = bonc::UnmodelledValue;
     using Mo = bonc::DeferredModelledValue;
     using R = bonc::dp::TraverseResult;
@@ -66,7 +62,7 @@ class DivisionPropertyModeller {
             boost::static_pointer_cast<bonc::ReadBitExpr>(expr)
                 ->getTargetAndOffset();
         if (target->getKind() == bonc::ReadTarget::Input) {
-          return Um::Unspecified; // TODO
+          return Um::Unspecified;  // TODO
         }
         return traverse(target->update_expressions.at(offset));
       }
@@ -85,18 +81,44 @@ class DivisionPropertyModeller {
           for (auto& input : lookup_expr->getInputs()) {
             inputs.push_back(traverse(input));
           }
-          int sbox_degree = 0;
-          for (auto i = 0u; i < sbox->getOutputWidth(); i++) {
-            auto anf = lookup_expr->getTable()->getANFRepresentation(i);
-            auto max_term = *std::ranges::max_element(
-                std::views::iota(0uz, anf.size()), {},
-                [&anf](size_t index) -> int { return index * +anf.test(index); });
-            auto degree = std::popcount(max_term);
-            sbox_degree = std::max(sbox_degree, degree);
+          if (std::ranges::any_of(
+                  inputs, [](const auto& v) { return !v.modelled(); })) {
+            outputs = std::vector<R>(sbox->getOutputWidth(), Um::Unspecified);
+          } else {
+            auto vars = inputs | std::views::transform([](const R& r) {
+                          return std::get<Mo>(r.variant());
+                        })
+                      | std::ranges::to<std::vector>();
+            std::ranges::generate_n(
+                std::back_inserter(vars), sbox->getOutputWidth(),
+                [&]() { return model.createDeferredVariable(); });
+
+            auto vertices = divisionPropertyTrail(std::move(sbox));
+            auto inequalities = vToH(vertices);
+            auto reduced = reduceInequalities(inequalities, vertices);
+            for (const auto& [coeff, constant] : reduced) {
+              std::vector<bonc::LinearExprItem<Mo>> items;
+              std::ranges::transform(vars, coeff, std::back_inserter(items),
+                                     [](const Mo& var, int c) {
+                                       return bonc::LinearExprItem<Mo>(var, c);
+                                     });
+              auto expr = bonc::LinearExpr<Mo>(std::move(items), constant);
+              model.addConstraint(std::move(expr) >= 0);
+            }
+            outputs = vars | std::views::drop(inputs.size())
+                    | std::views::transform([](const Mo& var) {
+                        return bonc::dp::TraverseResult{var};
+                      })
+                    | std::ranges::to<std::vector>();
           }
-          // TODO
+          traversed_sbox_inputs.insert({key, outputs});
         }
-        return outputs.at(lookup_expr->getOutputOffset());
+        auto output_offset = lookup_expr->getOutputOffset();
+        if (output_offset >= outputs.size()) {
+          return Um::Unspecified;
+        } else {
+          return outputs.at(lookup_expr->getOutputOffset());
+        }
       }
       case bonc::BitExpr::Not: {
         auto not_operand =
@@ -177,14 +199,15 @@ public:
   }
 
   bonc::dp::TraverseResult traverse(bonc::Ref<bonc::BitExpr> expr) {
+    if (auto it = traversed.find(expr.get()); it != traversed.end()) {
+      return it->second.reuse(model);
+    }
     auto result = traverseImpl(expr);
     auto [it, suc] = traversed.insert({expr.get(), result});
     assert(suc);
-    return result;
+    return result.reuse(model);
   }
 };
-
-#define main main2
 
 int main(int argc, char** argv) {
   namespace po = boost::program_options;

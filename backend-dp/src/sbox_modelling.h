@@ -24,5 +24,18 @@ std::vector<PolyhedronInequality> reduceInequalities(
     const std::vector<PolyhedronInequality>& inequalities,
     const std::vector<PolyhedronVertex>& points);
 
+/**
+ * @brief Compute the division property trail of a given S-box.
+ *
+ * Implements the 'Algorithm 2' of [Xiang 2016]
+ *
+ * @ref [Xiang 2016] https://doi.org/10.1007/978-3-662-53887-6_24
+ * @ref
+ * https://github.com/xiangzejun/MILP_Division_Property/blob/master/algorithm3/sbox.py
+ *
+ * @param sbox
+ * @return DP Trails. Each item inside has form of [...input bits, ...output
+ * bits], both starts from index 0.
+ */
 std::vector<PolyhedronVertex> divisionPropertyTrail(
     const bonc::Ref<bonc::LookupTable>& sbox);

@@ -62,6 +62,8 @@ public:
   LinearExpr() = default;
   LinearExpr(double constant) : constant{constant} {}
   LinearExpr(LinearExprItem<T> item) : items{item} {}
+  LinearExpr(std::vector<LinearExprItem<T>> items, double constant = 0.0)
+      : items{std::move(items)}, constant{constant} {}
 
   LinearExpr operator+(LinearExprItem<T> item) {
     return *this + LinearExpr(std::move(item));

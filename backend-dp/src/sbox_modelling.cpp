@@ -194,22 +194,3 @@ std::vector<PolyhedronVertex> divisionPropertyTrail(
 
   return trails;
 }
-
-////// REMOVE ME
-
-#include <print>
-
-int main() {
-  auto table =
-      bonc::LookupTable::create("arr", 4, 4,
-                                {0xc, 0x5, 0x6, 0xb, 0x9, 0x0, 0xa, 0xd, 0x3,
-                                 0xe, 0xf, 0x8, 0x4, 0x7, 0x1, 0x2});
-
-  auto vertices = divisionPropertyTrail(std::move(table));
-  std::ranges::sort(vertices, std::ranges::lexicographical_compare);
-  auto inequalities = vToH(vertices);
-  auto reduced = reduceInequalities(inequalities, vertices);
-  for (const auto& [coeff, constant] : reduced) {
-    std::println("{} + {} >= 0", coeff, constant);
-  }
-}

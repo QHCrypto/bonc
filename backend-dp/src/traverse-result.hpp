@@ -47,6 +47,9 @@ public:
   auto visit(auto&& fn) {
     return std::visit(std::forward<decltype(fn)>(fn), this->variant());
   }
+  bool modelled() const {
+    return std::holds_alternative<DeferredModelledValue>(this->value);
+  }
 };
 
 }
