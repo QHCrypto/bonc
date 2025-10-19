@@ -23,6 +23,14 @@ inline constexpr bool is_one_of_variant_v =
     is_one_of_variant<T, std::remove_cv_t<Var>>::value;
 }  // namespace detail
 
+/**
+ * @brief Assert that a variant value is one of the specified types
+ * 
+ * @example
+ *     std::variant<A,B,C> v = ...;
+ *     auto ab1 = assert_into<A,B>(v);         // （若持有 C 则抛异常）
+ *
+ */
 template <class... Keep>
 auto assert_into(auto&& v) -> std::variant<Keep...>
   requires(detail::Variant<std::remove_cvref_t<decltype(v)>>
@@ -44,6 +52,27 @@ auto assert_into(auto&& v) -> std::variant<Keep...>
       std::forward<decltype(v)>(v));
 }
 
-// 用法：
-// std::variant<A,B,C> v = ...;
-// auto ab1 = assert_into<A,B>(v);         // （若持有 C 则抛异常）
+
+/**
+ * @brief Parse comma-separated numbers from a string, support a-b for contiguous ranges
+ * 
+ */
+inline std::unordered_set<int> parseCommaSeparatedNumbers(const std::string& str) {
+  std::unordered_set<int> result;
+  std::stringstream ss(str);
+  std::string token;
+  while (std::getline(ss, token, ',')) {
+    size_t dash_pos = token.find('-');
+    if (dash_pos != std::string::npos) {
+      int start = std::stoi(token.substr(0, dash_pos));
+      int end = std::stoi(token.substr(dash_pos + 1));
+      assert(start <= end);
+      for (int i = start; i <= end; ++i) {
+        result.insert(i);
+      }
+    } else {
+      result.insert(std::stoi(token));
+    }
+  }
+  return result;
+}

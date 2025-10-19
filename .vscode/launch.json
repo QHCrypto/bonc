@@ -9,7 +9,7 @@
       "type": "cppdbg",
       "request": "launch",
       "program": "${workspaceFolder}/build/bin/bonc-backend-dp",
-      "args": ["../../2025.1/se_test/present/bonc_round4.json"],
+      "args": ["../../2025.1/se_test/present/bonc_round4.json", "-I", "plaintext=4-63"],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "environment": [],

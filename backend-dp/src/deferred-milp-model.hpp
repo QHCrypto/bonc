@@ -89,6 +89,13 @@ public:
   LinearConstraint<T> operator==(double rhs);
   LinearConstraint<T> operator<=(double rhs);
   LinearConstraint<T> operator>=(double rhs);
+
+  auto&& getItems(this auto&& self) {
+    return self.items;
+  }
+  double getConstant() const {
+    return constant;
+  }
 };
 
 enum class Comparator {
@@ -98,15 +105,16 @@ enum class Comparator {
 };
 
 template <typename T>
-class LinearConstraint {
-private:
+struct LinearConstraint {
   LinearExpr<T> lhs;
   Comparator comparator;
   double rhs;
+};
 
-public:
-  LinearConstraint(LinearExpr<T> lhs, Comparator comparator, double rhs)
-      : lhs{std::move(lhs)}, comparator{comparator}, rhs{rhs} {}
+template <typename T>
+struct Objective {
+  LinearExpr<T> expr;
+  bool maximize{};
 };
 
 template <typename T>
@@ -129,6 +137,10 @@ private:
   std::vector<LinearConstraint<ModelledValue>> constraints;
   std::vector<LinearConstraint<DeferredModelledValue>> deferred_constraints;
 
+  const bool allVariablesBinary{true};
+
+  std::optional<Objective<DeferredModelledValue>> objective;
+
 public:
   ModelledValue createVariable(const std::string& name = "") {
     auto ptr = std::make_unique<ModelVar>(ModelVar{name});
@@ -145,6 +157,15 @@ public:
     deferred_values.push_back(std::move(deferred));
     return result;
   }
+  DeferredModelledValue createDeferredConstant(bool value) {
+    auto var = this->createVariable();
+    if (value) {
+      this->addConstraint(LinearExpr<ModelledValue>{var} == 1);
+    } else {
+      this->addConstraint(LinearExpr<ModelledValue>{var} == 0);
+    }
+    return this->createDeferredVariable(var);
+  }
 
   void addConstraint(LinearConstraint<ModelledValue> constr) {
     constraints.emplace_back(std::move(constr));
@@ -152,6 +173,82 @@ public:
   void addConstraint(LinearConstraint<DeferredModelledValue> constr) {
     deferred_constraints.emplace_back(std::move(constr));
   }
+
+  void setObjective(LinearExpr<DeferredModelledValue> obj,
+                    bool maximize = false) {
+    objective = {std::move(obj), maximize};
+  }
+
+  std::string gurobiLpFormat() const {
+    using namespace std::literals;
+    std::unordered_map<const ModelVar*, std::string> var_names;
+    for (auto i = 0uz; i < variables.size(); ++i) {
+      var_names[variables[i].get()] = "x"s + std::to_string(i);
+    }
+    auto printVar = [&](const auto& var) -> std::string {
+      using T = std::remove_cvref_t<decltype(var)>;
+      if constexpr (std::is_same_v<T, ModelledValue>) {
+        return var_names.at(var);
+      } else if constexpr (std::is_same_v<T, DeferredModelledValue>) {
+        return var_names.at(var->getVar());
+      } else {
+        static_assert(sizeof(T) == 0, "Unsupported var type");
+        return "";
+      }
+    };
+    auto printLin = [&](auto&& expr) {
+      std::string result;
+      for (auto& [var, coeff] : expr.getItems()) {
+        result += coeff >= 0 ? " + " : " - ";
+        result += std::format("{} {}", std::abs(coeff), printVar(var));
+      }
+      return result;
+    };
+    std::string lp;
+    if (objective.has_value()) {
+      auto& [expr, maximize] = *objective;
+      lp += (maximize ? "Maximize\n" : "Minimize\n");
+      lp += printLin(expr) + "\n";
+    }
+    lp += "Subject To\n";
+    for (auto& [lhs, comparator, rhs] : constraints) {
+      lp += printLin(lhs) + " ";
+      switch (comparator) {
+        case Comparator::Equal:
+          lp += "= ";
+          break;
+        case Comparator::LessEqual:
+          lp += "<= ";
+          break;
+        case Comparator::GreaterEqual:
+          lp += ">= ";
+          break;
+      }
+      lp += std::to_string(rhs - lhs.getConstant()) + "\n";
+    }
+    for (auto& [lhs, comparator, rhs] : deferred_constraints) {
+      lp += printLin(lhs) + " ";
+      switch (comparator) {
+        case Comparator::Equal:
+          lp += "= ";
+          break;
+        case Comparator::LessEqual:
+          lp += "<= ";
+          break;
+        case Comparator::GreaterEqual:
+          lp += ">= ";
+          break;
+      }
+      lp += std::to_string(rhs - lhs.getConstant()) + "\n";
+    }
+    if (allVariablesBinary) {
+      lp += "Binary\n";
+      for (auto& [_, name] : var_names) {
+        lp += name + "\n";
+      }
+    }
+    return lp;
+  }
 };
 
-}
+}  // namespace bonc

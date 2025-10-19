@@ -39,8 +39,9 @@ struct Overload : F... {
 #include "traverse-result.hpp"
 
 class DivisionPropertyModeller {
-  std::unordered_set<std::string> input_names;
+  std::unordered_map<std::string, std::unordered_set<int>> active_bits;
   std::unordered_map<const bonc::BitExpr*, bonc::dp::TraverseResult> traversed;
+  std::unordered_set<bonc::DeferredModelledValue> outputs;
   std::unordered_map<bonc::SBoxInputBlock,
                      std::vector<bonc::dp::TraverseResult>>
       traversed_sbox_inputs;
@@ -55,14 +56,25 @@ class DivisionPropertyModeller {
       case bonc::BitExpr::Constant: {
         auto value =
             boost::static_pointer_cast<bonc::ConstantBitExpr>(expr)->getValue();
-        return value ? Um::True : Um::False;
+        return value ? R::makeUnmodelled(Um::True)
+                     : R::makeUnmodelled(Um::False);
       }
       case bonc::BitExpr::Read: {
         auto [target, offset] =
             boost::static_pointer_cast<bonc::ReadBitExpr>(expr)
                 ->getTargetAndOffset();
         if (target->getKind() == bonc::ReadTarget::Input) {
-          return Um::Unspecified;  // TODO
+          if (auto it = active_bits.find(target->getName());
+              it != active_bits.end()) {
+            if (it->second.find(offset) != it->second.end()) {
+              return R::makeModelled(model.createDeferredConstant(true), model);
+            } else {
+              return R::makeModelled(model.createDeferredConstant(false),
+                                     model);
+            }
+          } else {
+            return R::makeUnmodelled(Um::Unspecified);
+          }
         }
         return traverse(target->update_expressions.at(offset));
       }
@@ -83,7 +95,8 @@ class DivisionPropertyModeller {
           }
           if (std::ranges::any_of(
                   inputs, [](const auto& v) { return !v.modelled(); })) {
-            outputs = std::vector<R>(sbox->getOutputWidth(), Um::Unspecified);
+            outputs = std::vector<R>(sbox->getOutputWidth(),
+                                     R::makeUnmodelled(Um::Unspecified));
           } else {
             auto vars = inputs | std::views::transform([](const R& r) {
                           return std::get<Mo>(r.variant());
@@ -106,8 +119,8 @@ class DivisionPropertyModeller {
               model.addConstraint(std::move(expr) >= 0);
             }
             outputs = vars | std::views::drop(inputs.size())
-                    | std::views::transform([](const Mo& var) {
-                        return bonc::dp::TraverseResult{var};
+                    | std::views::transform([&](const Mo& var) {
+                        return R::makeModelled(var, model);
                       })
                     | std::ranges::to<std::vector>();
           }
@@ -115,7 +128,7 @@ class DivisionPropertyModeller {
         }
         auto output_offset = lookup_expr->getOutputOffset();
         if (output_offset >= outputs.size()) {
-          return Um::Unspecified;
+          return R::makeUnmodelled(Um::False);
         } else {
           return outputs.at(lookup_expr->getOutputOffset());
         }
@@ -131,37 +144,47 @@ class DivisionPropertyModeller {
             boost::static_pointer_cast<bonc::BinaryBitExpr>(expr);
         auto lhs = traverse(binary_expr->getLeft());
         auto rhs = traverse(binary_expr->getRight());
-        auto single_side_modelled_visitor = [kind](Um lhs, Mo rhs) -> R {
-          if (kind == bonc::BinaryBitExpr::And && lhs.type == Um::False) {
-            return Um::False;
-          } else if (kind == bonc::BinaryBitExpr::Or && lhs.type == Um::True) {
-            return Um::True;
-          } else {
-            return Um::Unspecified;
+        auto single_side_modelled_visitor = [&](Um lhs, Mo rhs) -> R {
+          if (kind == bonc::BinaryBitExpr::And) {
+            if (lhs.type == Um::False) {
+              return R::makeUnmodelled(Um::False);
+            } else if (lhs.type == Um::True) {
+              return R::makeModelled(rhs, model);
+            }
           }
+          if (kind == bonc::BinaryBitExpr::Or) {
+            if (lhs.type == Um::False) {
+              return R::makeModelled(rhs, model);
+            } else if (lhs.type == Um::True) {
+              return R::makeUnmodelled(Um::True);
+            }
+          }
+          return R::makeUnmodelled(Um::Unspecified);
         };
         return std::visit(
             Overload{
                 [kind](Um lhs, Um rhs) -> R {
                   if (lhs.type == Um::Unspecified
                       || rhs.type == Um::Unspecified) {
-                    return Um::Unspecified;
+                    return R::makeUnmodelled(Um::Unspecified);
                   }
                   if (kind == bonc::BitExpr::And) {
                     return (lhs.type == Um::True && rhs.type == Um::True)
-                             ? Um::True
-                             : Um::False;
+                             ? R::makeUnmodelled(Um::True)
+                             : R::makeUnmodelled(Um::False);
                   } else {  // kind == bonc::BitExpr::Or
                     return (lhs.type == Um::False && rhs.type == Um::False)
-                             ? Um::False
-                             : Um::True;
+                             ? R::makeUnmodelled(Um::False)
+                             : R::makeUnmodelled(Um::True);
                   }
                 },
                 single_side_modelled_visitor,
                 [kind, single_side_modelled_visitor](Mo lhs, Um rhs) -> R {
                   return single_side_modelled_visitor(rhs, lhs);
                 },
-                [this](Mo lhs, Mo rhs) -> R { return model.and_(lhs, rhs); },
+                [this](Mo lhs, Mo rhs) -> R {
+                  return R::makeModelled(model.and_(lhs, rhs), model);
+                },
             },
             lhs.variant(), rhs.variant());
       }
@@ -175,13 +198,20 @@ class DivisionPropertyModeller {
                 [](Um lhs, Um rhs) -> R {
                   if (lhs.type == Um::Unspecified
                       || rhs.type == Um::Unspecified) {
-                    return Um::Unspecified;
+                    return R::makeUnmodelled(Um::Unspecified);
                   }
-                  return (lhs.type == rhs.type) ? Um::False : Um::True;
+                  return (lhs.type == rhs.type) ? R::makeUnmodelled(Um::False)
+                                                : R::makeUnmodelled(Um::True);
                 },
-                [](Um lhs, Mo rhs) -> R { return rhs; },
-                [](Mo lhs, Um rhs) -> R { return lhs; },
-                [this](Mo lhs, Mo rhs) -> R { return model.xor_(lhs, rhs); },
+                [&](Um lhs, Mo rhs) -> R {
+                  return R::makeModelled(rhs, model);
+                },
+                [&](Mo lhs, Um rhs) -> R {
+                  return R::makeModelled(lhs, model);
+                },
+                [&](Mo lhs, Mo rhs) -> R {
+                  return R::makeModelled(model.xor_(lhs, rhs), model);
+                },
             },
             lhs.variant(), rhs.variant());
       }
@@ -194,8 +224,9 @@ class DivisionPropertyModeller {
 public:
   DivisionPropertyModeller() = default;
 
-  void addInputNames(std::span<std::string> names) {
-    input_names.insert_range(names);
+  void addActiveBits(const std::string& name,
+                     std::unordered_set<int> active_bits) {
+    this->active_bits[name] = std::move(active_bits);
   }
 
   bonc::dp::TraverseResult traverse(bonc::Ref<bonc::BitExpr> expr) {
@@ -205,7 +236,20 @@ public:
     auto result = traverseImpl(expr);
     auto [it, suc] = traversed.insert({expr.get(), result});
     assert(suc);
-    return result.reuse(model);
+    return result;
+  }
+
+  void markOutput(const bonc::dp::TraverseResult& result) {
+    if (result.modelled()) {
+      auto var = std::get<bonc::DeferredModelledValue>(result.variant());
+      this->outputs.insert(var);
+    }
+  }
+
+  std::string finalize() {
+    this->model.setObjective(std::ranges::fold_left(
+        outputs, bonc::LinearExpr<bonc::DeferredModelledValue>{}, std::plus{}));
+    return this->model.gurobiLpFormat();
   }
 };
 
@@ -216,7 +260,8 @@ int main(int argc, char** argv) {
   desc.add_options()
     ("help", "Print help message")
     ("input", po::value<std::string>()->required(), "Input file containing the frontend result in JSON format")
-    ("input-bits,I", po::value<std::string>()->default_value(""), "BONC Input bits' name, format \"name1,name2...\"")
+    ("active-bits,I", po::value<std::string>()->default_value(""), "Specify active bits as initial DP, format \"name1=range;name2=range;...\". Range is comma-separated numbers or a-b for contiguous ranges, e.g., \"0,2,4-7\"")
+    ("output,o", po::value<std::string>()->default_value("output.lp"), "Output LP file")
   ;
   // clang-format on
 
@@ -242,19 +287,31 @@ int main(int argc, char** argv) {
   auto [_, _, outputs] = parser.parseAll();
 
   auto modeller = DivisionPropertyModeller{};
-  std::vector<std::string> input_names;
-  boost::split(input_names, vm["input-bits"].as<std::string>(),
-               boost::is_any_of(","));
-  if (input_names.size() == 0) {
-    throw std::runtime_error(
-        "You should at least specify one input name in --input-bits");
+  std::vector<std::string> input_blocks;
+  boost::split(input_blocks, vm["active-bits"].as<std::string>(),
+               boost::is_any_of(";"));
+  for (auto& block : input_blocks) {
+    auto eq_pos = block.find('=');
+    if (eq_pos == std::string::npos) {
+      throw std::runtime_error(
+          "Invalid format for --active-bits, expected name=range");
+    }
+    auto name = block.substr(0, eq_pos);
+    auto range_str = block.substr(eq_pos + 1);
+    auto active_bits = parseCommaSeparatedNumbers(range_str);
+    modeller.addActiveBits(name, std::move(active_bits));
   }
-  modeller.addInputNames(input_names);
 
   for (auto& [name, size, expressions] : outputs) {
     std::println("Output: {}, Size: {}", name, size);
     for (auto& expr : expressions) {
-      modeller.traverse(expr);
+      auto result = modeller.traverse(expr);
+      modeller.markOutput(result);
     }
   }
+
+  std::string output_file = vm["output"].as<std::string>();
+  std::ofstream ofs(output_file);
+  ofs << modeller.finalize();
+  ofs.close();
 }
