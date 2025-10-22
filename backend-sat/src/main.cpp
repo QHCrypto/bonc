@@ -23,6 +23,7 @@ public:
 private:
   std::unordered_set<bonc::sat_modeller::Variable> weight_vars;
   std::unordered_set<bonc::sat_modeller::Variable> input_vars;
+  std::unordered_set<bonc::sat_modeller::Variable> free_vars;
   std::unordered_set<std::string> input_names;
 
   bonc::Ref<bonc::LookupTable> AND_TABLE;
@@ -81,7 +82,8 @@ private:
         [input_width](int x) -> std::size_t {
       return input_width - int(std::log2(std::abs(x))) - 1;
     };
-    auto weight_fn = type == ModellingType::DDT ? ddt_weight_fn : lat_weight_fn;
+    auto& weight_fn =
+        type == ModellingType::DDT ? ddt_weight_fn : lat_weight_fn;
     auto template_ = model.buildTableTemplate(table, std::move(weight_fn));
     auto template_ptr = std::make_unique<TableTemplate>(std::move(template_));
     auto raw_ptr = template_ptr.get();
@@ -118,6 +120,12 @@ private:
     return output_vars.at(output_offset);
   }
 
+  bonc::sat_modeller::Variable createFreeVariable() {
+    auto variable = this->model.createVariable("FREE");
+    this->free_vars.insert(variable);
+    return variable;
+  }
+
   bonc::sat_modeller::Variable traverse_impl(bonc::Ref<bonc::BitExpr> expr) {
     switch (expr->getKind()) {
       case bonc::BitExpr::Constant: {
@@ -134,15 +142,15 @@ private:
         auto name = target->getName();
         if (target->getKind() == bonc::ReadTarget::Input) {
           bool is_input_bit = this->input_names.contains(name);
-          if (this->type == ModellingType::LAT || is_input_bit) {
+          if (is_input_bit) {
             auto input =
                 model.createVariable(std::format("input_{}_{}", name, offset));
-            if (is_input_bit) {
-              this->input_vars.insert(input);
-            }
+            this->input_vars.insert(input);
             return input;
-          } else {
+          } else if (this->type == ModellingType::DDT) {
             return FALSE;
+          } else {
+            return this->createFreeVariable();
           }
         }
         auto expr = target->update_expressions.at(offset);
@@ -208,15 +216,16 @@ public:
       return it->second;
     }
     auto variable = traverse_impl(std::move(expr));
+    // always use unique variable if it is 'free'
+    if (free_vars.contains(variable)) {
+      return createFreeVariable();
+    }
+
     modelled_exprs.emplace(expr_raw, variable);
     return variable;
   }
 
   void complete(std::optional<std::size_t> max_weight = std::nullopt) {
-    std::cerr << this->input_vars.size() << '\n';
-    // for (auto i : input_vars) {
-    //   std::cerr << this->model.getVariableDetail(i.getIndex()).name << '\n';
-    // }
     this->setWeightLessThen(max_weight ? *max_weight
                                        : (this->type == ModellingType::DDT
                                               ? this->input_vars.size()
@@ -226,11 +235,33 @@ public:
 
 #ifdef USE_CRYPTOMINISAT5
   void debugSolution(const std::vector<bonc::SolvedModelValue>& values) const {
+    std::unordered_map<bonc::SBoxInputBlock,
+                       std::vector<const bonc::LookupBitExpr*>>
+        visited;
     for (auto& [expr, var] : modelled_exprs) {
+      if (expr->getKind() == bonc::BitExpr::Lookup) {
+        auto lookup_expr = static_cast<const bonc::LookupBitExpr*>(expr);
+        bonc::SBoxInputBlock block{lookup_expr->getInputs(),
+                                   lookup_expr->getTable()};
+        if (!visited.contains(block)) {
+          visited.emplace(block,
+                          std::vector<const bonc::LookupBitExpr*>{4, nullptr});
+        }
+        visited.at(block).at(lookup_expr->getOutputOffset()) = lookup_expr;
+      }
       std::cout << values.at(var.getIndex()) << " | ";
       std::cout << std::setw(20) << model.getVariableDetail(var.getIndex()).name
                 << " | ";
       expr->print(std::cout);
+      if (expr->getKind() == bonc::BitExpr::Read) {
+        auto read_expr = static_cast<const bonc::ReadBitExpr*>(expr);
+        auto target = read_expr->getTarget();
+        auto offset = read_expr->getOffset();
+        if (target->getKind() == bonc::ReadTarget::State) {
+          std::cout << " -> ";
+          target->update_expressions.at(offset)->print(std::cout);
+        }
+      }
       std::cout << "\n";
     }
   }
@@ -254,64 +285,29 @@ private:
 
 void printStateValue(std::vector<bonc::SolvedModelValue> values) {
   unsigned short value = 0;  // per 4 bits
+  bool is_undef = false;
   for (auto i = 0uz; i < values.size(); i++) {
-    if (values.at(i) == bonc::SolvedModelValue::True) {
-      value |= (1 << (i % 4));
+    if (values.at(i) == bonc::SolvedModelValue::Undefined) {
+      is_undef = true;
+    } else {
+      if (values.at(i) == bonc::SolvedModelValue::True) {
+        value |= (1 << (i % 4));
+      }
     }
     if (i % 4 == 3) {
-      if (value) {
+      if (is_undef) {
+        std::print("x");
+      } else if (value) {
         std::print("{:x}", value);
-        value = 0;
       } else {
         std::print("-");
       }
+      value = 0;
+      is_undef = false;
     }
   }
   std::println("");
 }
-
-int test_sbox_modelling() {
-  bonc::sat_modeller::SATModel model;
-  auto TRUE = model.createVariable("TRUE");
-  auto FALSE = model.createVariable("FALSE");
-  model.addClause({TRUE});
-  model.addClause({-FALSE});
-
-  auto a = model.createVariable("a");
-  auto b = model.createVariable("b");
-  model.addEquivalentClause({a, b});
-  model.print(std::cout, true);
-
-  auto table =
-      bonc::LookupTable::create("test", 4, 4,
-                                {0xE, 0x4, 0xD, 0x1, 0x2, 0xF, 0xB, 0x8, 0x3,
-                                 0xA, 0x6, 0xC, 0x5, 0x9, 0x0, 0x7});
-  auto ddt = table->getLAT();
-  for (const auto& row : ddt) {
-    for (const auto& col : row) {
-      std::print("{:>2} ", col);
-    }
-    std::println();
-  }
-  // auto template_ = model.buildTableTemplate(ddt);
-  // auto output_vars = model.createVariables(4, "outputs");
-  // auto weight_vars = model.addWeightTableClauses(
-  //     template_, {FALSE, FALSE, FALSE, TRUE}, output_vars);
-  // auto assignments = bonc::solve(model);
-  // if (!assignments) {
-  //   return 1;
-  // }
-
-  // for (auto i = 0uz; i < assignments->size(); i++) {
-  //   std::cout << model.getVariableDetail(i).name << " = " <<
-  //   assignments->at(i)
-  //             << '\n';
-  // }
-
-  return 0;
-}
-
-// #define main main2
 
 #include <boost/program_options.hpp>
 #include <ranges>
@@ -376,6 +372,12 @@ int main(int argc, char** argv) {
   modeller.addInputNames(input_names);
 
   auto [inputs, iterations, outputs] = parser.parseAll();
+  // auto debug_outputs = *std::ranges::find_if(
+  //     iterations, [](auto& target) { return target->getName() == "3/5"; });
+  // for (auto& expr : debug_outputs->update_expressions) {
+  //   modeller.traverse(expr);
+  // }
+
   for (auto& info : outputs) {
     std::cout << "Output: " << info.name << ", Size: " << info.size << "\n";
     for (auto& expr : info.expressions) {
@@ -404,6 +406,8 @@ int main(int argc, char** argv) {
       return 1;
     }
     std::println("SATISFIABLE");
+
+    // modeller.debugSolution(*values);
 
     std::size_t weight = 0;
     for (auto var : modeller.getWeightVars()) {

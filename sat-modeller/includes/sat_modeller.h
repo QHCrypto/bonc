@@ -103,7 +103,7 @@ public:
   std::vector<Variable> createVariables(std::size_t count,
                                         const std::string& name_prefix = "");
   void addClause(const std::vector<Literal>& lits);
-  using GetWeightFunction = std::function<std::size_t(int)>;
+  using GetWeightFunction = std::move_only_function<std::size_t(int)>;
   static TableTemplate buildTableTemplate(const RawTable& table, GetWeightFunction weight_fn);
   std::vector<Variable> addWeightTableClauses(
       const TableTemplate& table, const std::vector<Variable>& inputs,

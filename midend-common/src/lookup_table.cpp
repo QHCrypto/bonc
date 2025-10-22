@@ -2,6 +2,7 @@
 
 #include <boost/dynamic_bitset.hpp>
 #include <memory>
+#include <print>
 
 #include "anf.h"
 
@@ -91,6 +92,13 @@ public:
         }
       }
     }
+    // std::println("{}", values);
+    // for (const auto& row : *lat) {
+    //   for (const auto& col : row) {
+    //     std::print("{:>2} ", col);
+    //   }
+    //   std::println();
+    // }
   }
 };
 

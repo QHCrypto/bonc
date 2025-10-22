@@ -43,8 +43,11 @@ TableTemplate SATModel::buildTableTemplate(const RawTable& table, SATModel::GetW
     for (auto j = 0uz; j < row.size(); j++) {
       auto val = row.at(j);
       if (val) {
+        // std::println("DEBUG: {} {} {}", i, j, val);
         std::string input_bitvec = std::format("{:0{}b}", i, input_width);
+        std::ranges::reverse(input_bitvec);
         std::string output_bitvec = std::format("{:0{}b}", j, output_width);
+        std::ranges::reverse(output_bitvec);
         auto weight = weight_fn(val);
         std::string weight_vec = std::format("{:0>{}}{:1>{}}", "",
                                              output_width - weight, "", weight);
@@ -54,6 +57,7 @@ TableTemplate SATModel::buildTableTemplate(const RawTable& table, SATModel::GetW
     }
   }
   espresso_input += ".e\n";
+  // std::println("{}", espresso_input);
 
   // run espresso
   espresso_cxx::setPos(true);
