@@ -132,7 +132,7 @@ private:
         if (this->type == ModellingType::DDT) {
           return FALSE;
         } else {
-          return model.createVariable("const");
+          return createFreeVariable();
         }
       }
       case bonc::BitExpr::Read: {
@@ -308,6 +308,19 @@ void printStateValue(std::vector<bonc::SolvedModelValue> values) {
   }
   std::println("");
 }
+
+// int main() {
+//   bonc::sat_modeller::SATModel model;
+//   auto a = model.createVariable("a");
+//   auto b = model.createVariable("b");
+//   auto c = model.createVariable("c");
+//   auto r = model.createVariable("r");
+//   model.addXorClause({a, b, c}, r);
+//   model.print(std::cout);
+//   return 0;
+// }
+
+// #define main main2
 
 #include <boost/program_options.hpp>
 #include <ranges>
