@@ -14,7 +14,7 @@ int main(int argc, char** argv) {
     ("input", po::value<std::string>(), "Input file containing the frontend result in JSON format")
     ("input-degree,d", po::value<std::string>()->default_value(""), "BONC Input degree, format \"name1=value1,name2=value2,...\"")
     ("default-input-degree,D", po::value<int>()->default_value(0), "Default BONC Input degree")
-    ("expand", po::value<int>()->default_value(1), "Expand substitute operation n times");
+    ("expand", po::value<int>(&expand_times)->default_value(1), "Expand substitute operation n times");
 
   po::positional_options_description p;
   p.add("input", -1);

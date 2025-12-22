@@ -30,5 +30,6 @@ using Polynomial = bonc::ANFPolynomial<bonc::ReadTargetAndOffset>;
 
 int numericMapping(const Polynomial& poly);
 
+extern int expand_times;
 
 void setInputDegree(std::unordered_map<std::string, int> input_degrees, int default_degree = 0);

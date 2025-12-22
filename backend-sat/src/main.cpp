@@ -226,10 +226,11 @@ public:
   }
 
   void complete(std::optional<std::size_t> max_weight = std::nullopt) {
-    this->setWeightLessThen(max_weight ? *max_weight
-                                       : (this->type == ModellingType::DDT
-                                              ? this->input_vars.size()
-                                              : this->input_vars.size() / 2));
+    this->setWeightLessThen(max_weight
+                                ? *max_weight
+                                : (this->type == ModellingType::DDT
+                                       ? this->input_vars.size() - 1
+                                       : (this->input_vars.size() - 1) / 2));
     this->assureInputNotEmpty();
   }
 

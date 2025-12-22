@@ -1,4 +1,5 @@
 #include <frontend_result_parser.h>
+#include <gurobi_c++.h>
 #include <sbox_and_input.h>
 
 #include <boost/algorithm/string.hpp>
@@ -246,14 +247,22 @@ public:
     }
   }
 
-  std::string finalize() {
+  auto finalize() {
     this->model.setObjective(std::ranges::fold_left(
         outputs, bonc::LinearExpr<bonc::DeferredModelledValue>{}, std::plus{}));
     return this->model.gurobiLpFormat();
   }
+
+  std::unordered_set<const bonc::ModelVar*> getOutputs() const {
+    std::unordered_set<const bonc::ModelVar*> result;
+    for (auto var : outputs) {
+      result.insert(var->getVar());
+    }
+    return result;
+  }
 };
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv) try {
   namespace po = boost::program_options;
   po::options_description desc("Allowed options");
   // clang-format off
@@ -261,6 +270,7 @@ int main(int argc, char** argv) {
     ("help", "Print help message")
     ("input", po::value<std::string>()->required(), "Input file containing the frontend result in JSON format")
     ("active-bits,I", po::value<std::string>()->default_value(""), "Specify active bits as initial DP, format \"name1=range;name2=range;...\". Range is comma-separated numbers or a-b for contiguous ranges, e.g., \"0,2,4-7\"")
+    ("output-bits,O", po::value<std::string>(), "Specify output bits as target final DP, format \"name1=range;name2=range;...\". Defaults to all output bits. Range is comma-separated numbers or a-b for contiguous ranges, e.g., \"0,2,4-7\"")
     ("output,o", po::value<std::string>()->default_value("output.lp"), "Output LP file")
   ;
   // clang-format on
@@ -302,16 +312,96 @@ int main(int argc, char** argv) {
     modeller.addActiveBits(name, std::move(active_bits));
   }
 
+  bool all_output_bits = false;
+  std::unordered_map<std::string, std::unordered_set<int>> output_bits;
+  if (vm.count("output-bits")) {
+    auto output_bits_string = vm["output-bits"].as<std::string>();
+    std::vector<std::string> output_blocks;
+    all_output_bits = output_bits_string.empty();
+    boost::split(output_blocks, output_bits_string, boost::is_any_of(";"));
+    for (auto& block : output_blocks) {
+      auto eq_pos = block.find('=');
+      if (eq_pos == std::string::npos) {
+        throw std::runtime_error(
+            "Invalid format for --output-bits, expected name=range");
+      }
+      auto name = block.substr(0, eq_pos);
+      auto range_str = block.substr(eq_pos + 1);
+      auto bit_indices = parseCommaSeparatedNumbers(range_str);
+      output_bits[name] = std::move(bit_indices);
+    }
+  } else {
+    all_output_bits = true;
+  }
+
   for (auto& [name, size, expressions] : outputs) {
     std::println("Output: {}, Size: {}", name, size);
-    for (auto& expr : expressions) {
-      auto result = modeller.traverse(expr);
-      modeller.markOutput(result);
+    for (auto i = 0uz; i < expressions.size(); i++) {
+      if (all_output_bits
+          || (output_bits.count(name) && output_bits.at(name).contains(i))) {
+        auto& expr = expressions.at(i);
+        std::println("  Bit {}", i);
+        auto result = modeller.traverse(expr);
+        modeller.markOutput(result);
+      }
     }
   }
 
+  auto [var_names, lp_content] = modeller.finalize();
   std::string output_file = vm["output"].as<std::string>();
-  std::ofstream ofs(output_file);
-  ofs << modeller.finalize();
-  ofs.close();
+  {
+    std::ofstream ofs(output_file);
+    ofs << lp_content;
+  }
+
+  GRBEnv env;
+  GRBModel model(env, output_file);
+
+  std::unordered_set<std::string> balanced;
+  auto output_vars = modeller.getOutputs();
+  bool success = false;
+  while (balanced.size() < output_vars.size()) {
+    model.optimize();
+    if (model.get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
+      auto obj = model.getObjective();
+      if (model.get(GRB_DoubleAttr_ObjVal) > 1) {
+        success = true;
+        break;
+      } else {
+        std::cout << "COUNTER = " << balanced.size() << "\n";
+        for (auto& v : output_vars) {
+          auto name = var_names.at(v);
+          auto u = model.getVarByName(name);
+          auto temp = u.get(GRB_DoubleAttr_X);
+          if (std::abs(temp - 1) < 1e-6) {
+            balanced.insert(name);
+            u.set(GRB_DoubleAttr_UB, 0);
+            model.update();
+            break;
+          }
+        }
+      }
+    } else if (model.get(GRB_IntAttr_Status) == GRB_INFEASIBLE) {
+      success = true;
+      break;
+    } else {
+      throw std::runtime_error("Unknown error!");
+    }
+  }
+  if (success) {
+    std::println("Distinguisher found!");
+    for (auto& v : balanced) {
+      std::print("{} ", v);
+    }
+    std::println("");
+  } else {
+    std::println("No distinguisher found.");
+  }
+} catch (const GRBException& e) {
+  std::cerr << "Gurobi Error code = " << e.getErrorCode() << std::endl;
+  std::cerr << e.getMessage() << std::endl;
+  return 1;
+} catch (const std::exception& e) {
+  std::cerr << "Error: " << e.what() << std::endl;
+  return 1;
 }

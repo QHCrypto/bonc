@@ -112,6 +112,8 @@ int monomialDegree(const Monomial& monomial) {
 
 std::unordered_map<Polynomial, int> polynomial_degrees;
 
+int expand_times = 1;
+
 int numericMapping(const Polynomial& poly) {
   if (auto it = polynomial_degrees.find(poly); it != polynomial_degrees.end()) {
     return it->second;
@@ -157,7 +159,9 @@ int variableDegree(bonc::ReadTargetAndOffset rto) {
       return it->second;
     } else {
       auto anf = readState(rto);
-      // anf = expandANF(anf.translate(numericMappingSubstitute));
+      for (int i = 0; i < expand_times; ++i) {
+        anf = expandANF(anf.translate(numericMappingSubstitute));
+      }
       auto result = numericMapping(anf);
       read_expr_degs[rto] = result;
       return result;

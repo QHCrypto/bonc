@@ -130,6 +130,11 @@ LinearConstraint<T> LinearExpr<T>::operator>=(double rhs) {
   return LinearConstraint<T>{*this, Comparator::GreaterEqual, rhs};
 }
 
+struct MaterializedResult {
+  std::unordered_map<const ModelVar*, std::string> variableNames;
+  std::string lpContent;
+};
+
 class DeferredMILPModel {
 private:
   std::vector<std::unique_ptr<ModelVar>> variables;
@@ -179,7 +184,7 @@ public:
     objective = {std::move(obj), maximize};
   }
 
-  std::string gurobiLpFormat() const {
+  MaterializedResult gurobiLpFormat() const {
     using namespace std::literals;
     std::unordered_map<const ModelVar*, std::string> var_names;
     for (auto i = 0uz; i < variables.size(); ++i) {
@@ -214,30 +219,18 @@ public:
     for (auto& [lhs, comparator, rhs] : constraints) {
       lp += printLin(lhs) + " ";
       switch (comparator) {
-        case Comparator::Equal:
-          lp += "= ";
-          break;
-        case Comparator::LessEqual:
-          lp += "<= ";
-          break;
-        case Comparator::GreaterEqual:
-          lp += ">= ";
-          break;
+        case Comparator::Equal: lp += "= "; break;
+        case Comparator::LessEqual: lp += "<= "; break;
+        case Comparator::GreaterEqual: lp += ">= "; break;
       }
       lp += std::to_string(rhs - lhs.getConstant()) + "\n";
     }
     for (auto& [lhs, comparator, rhs] : deferred_constraints) {
       lp += printLin(lhs) + " ";
       switch (comparator) {
-        case Comparator::Equal:
-          lp += "= ";
-          break;
-        case Comparator::LessEqual:
-          lp += "<= ";
-          break;
-        case Comparator::GreaterEqual:
-          lp += ">= ";
-          break;
+        case Comparator::Equal: lp += "= "; break;
+        case Comparator::LessEqual: lp += "<= "; break;
+        case Comparator::GreaterEqual: lp += ">= "; break;
       }
       lp += std::to_string(rhs - lhs.getConstant()) + "\n";
     }
@@ -247,7 +240,7 @@ public:
         lp += name + "\n";
       }
     }
-    return lp;
+    return {.variableNames = std::move(var_names), .lpContent = std::move(lp)};
   }
 };
 
