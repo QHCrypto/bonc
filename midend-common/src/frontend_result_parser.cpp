@@ -196,6 +196,9 @@ ANFPolynomial<ReadTargetAndOffset> bitExprToANFImpl(Ref<BitExpr> expr,
       auto table = lookup_expr->getTable();
       auto inputs = lookup_expr->getInputs();
       auto output_offset = lookup_expr->getOutputOffset();
+      if (output_offset >= table->getOutputWidth()) {
+        return ANFPolynomial<ReadTargetAndOffset>::fromConstant(false);
+      }
       auto anf_rep = table->getANFRepresentation(output_offset);
       auto result = ANFPolynomial<ReadTargetAndOffset>::fromConstant(false);
       for (std::size_t i = 0; i < anf_rep.size(); i++) {
