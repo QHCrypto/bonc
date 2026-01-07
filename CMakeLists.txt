@@ -18,6 +18,7 @@ add_subdirectory(ppl)
 add_subdirectory(sat-modeller)
 
 add_subdirectory(midend-common)
+add_subdirectory(backend-common)
 add_subdirectory(backend-nm)
 add_subdirectory(backend-sat)
 add_subdirectory(backend-dp)

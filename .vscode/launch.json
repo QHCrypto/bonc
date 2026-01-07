@@ -8,14 +8,14 @@
       "name": "(gdb) 启动",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build/bin/bonc-backend-nm",
-      "args": [
-        "--input",
-        "/tmp/bonc-ui/20251227T083339-hfktbi/temp-out/bonc_rounds4.json",
-        "-d",
-        "plaintext=1"
-      ],
-      // "args": ["--differential", "../../2025.1/se_test/xoodoo/bonc_round2.json", "--input-bits=plaintext", "--solve", "--print-states='.*'", "-w", "10"],
+      "program": "${workspaceFolder}/build/bin/bonc-backend-sat",
+      // "args": [
+      //   "--input",
+      //   "/tmp/bonc-ui/20251227T083339-hfktbi/temp-out/bonc_rounds4.json",
+      //   "-d",
+      //   "plaintext=1"
+      // ],
+      "args": ["--differential", "/tmp/bonc-ui/20251228T080212-m52byk/temp-out/bonc_round6.json", "--input-bits=plaintext", "--solve", "--print-states='.*'"],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",
       "environment": [],

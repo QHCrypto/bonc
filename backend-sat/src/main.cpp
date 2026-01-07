@@ -435,13 +435,14 @@ int main(int argc, char** argv) {
 
     auto state_name_regex = boost::regex(vm["print-states"].as<std::string>());
 
+    std::println("### print-state begin");
     for (bonc::Ref<bonc::ReadTarget>& target :
          std::views::concat(inputs, iterations)) {
       auto& name = target->getName();
       if (!boost::regex_match(name, state_name_regex)) {
         continue;
       }
-      std::println("State {}: ", name);
+      std::println("# State {}: ", name);
       std::vector<bonc::SolvedModelValue> state_values;
       for (auto index : std::views::iota(0uz, target->getSize() * CHAR_BIT)) {
         auto expr = parser.createExpr<bonc::ReadBitExpr>(target, index);
@@ -454,5 +455,6 @@ int main(int argc, char** argv) {
       }
       printStateValue(state_values);
     }
+    std::println("### print-state end");
   }
 }
