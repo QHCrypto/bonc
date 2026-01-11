@@ -1,6 +1,7 @@
 #include <frontend_result_parser.h>
 #include <gurobi_c++.h>
 #include <sbox_and_input.h>
+#include <perf.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
@@ -296,6 +297,8 @@ int main(int argc, char** argv) try {
 
   auto [_, _, outputs] = parser.parseAll();
 
+  bonc::backend_common::Timer timer;
+
   auto modeller = DivisionPropertyModeller{};
   std::vector<std::string> input_blocks;
   boost::split(input_blocks, vm["active-bits"].as<std::string>(),
@@ -340,7 +343,7 @@ int main(int argc, char** argv) try {
       if (all_output_bits
           || (output_bits.count(name) && output_bits.at(name).contains(i))) {
         auto& expr = expressions.at(i);
-        std::println("  Bit {}", i);
+        // std::println("  Bit {}", i);
         auto result = modeller.traverse(expr);
         modeller.markOutput(result);
       }
@@ -348,6 +351,11 @@ int main(int argc, char** argv) try {
   }
 
   auto [var_names, lp_content] = modeller.finalize();
+
+  std::println("Modelling time: {}, peak mem: {}kB",
+               timer.elapsed_as<std::chrono::milliseconds>(),
+               bonc::backend_common::peak_rss_bytes().value_or(0) / 1024);
+
   std::string output_file = vm["output"].as<std::string>();
   {
     std::ofstream ofs(output_file);
@@ -355,13 +363,21 @@ int main(int argc, char** argv) try {
   }
 
   GRBEnv env;
+  env.set(GRB_IntParam_OutputFlag, 0);
   GRBModel model(env, output_file);
+
+  std::println("Model variables: {}, constraints: {}",
+               model.get(GRB_IntAttr_NumVars),
+               model.get(GRB_IntAttr_NumConstrs));
+  timer.reset();
+  int solve_count = 0;
 
   std::unordered_set<std::string> balanced;
   auto output_vars = modeller.getOutputs();
   bool success = false;
   while (balanced.size() < output_vars.size()) {
     model.optimize();
+    solve_count++;
     if (model.get(GRB_IntAttr_Status) == GRB_OPTIMAL) {
       auto obj = model.getObjective();
       if (model.get(GRB_DoubleAttr_ObjVal) > 1) {
@@ -397,6 +413,10 @@ int main(int argc, char** argv) try {
   } else {
     std::println("No distinguisher found.");
   }
+  std::println("Solving {} models, time: {}, peak mem: {}kB",
+               solve_count,
+               timer.elapsed_as<std::chrono::milliseconds>(),
+               bonc::backend_common::peak_rss_bytes().value_or(0) / 1024);
 } catch (const GRBException& e) {
   std::cerr << "Gurobi Error code = " << e.getErrorCode() << std::endl;
   std::cerr << e.getMessage() << std::endl;

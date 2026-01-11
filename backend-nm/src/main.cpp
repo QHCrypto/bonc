@@ -2,8 +2,11 @@
 
 #include <iostream>
 #include <fstream>
+#include <print>
 
 #include <boost/program_options.hpp>
+
+#include <perf.h>
 
 namespace po = boost::program_options;
 
@@ -62,6 +65,7 @@ int main(int argc, char** argv) {
 
   auto [_, iterations, outputs] = parser.parseAll();
 
+  bonc::backend_common::Timer timer;
   std::vector<Polynomial> output_polys;
   for (auto& info : outputs) {
     std::cout << "Output: " << info.name << ", Size: " << info.size << "\n";
@@ -69,10 +73,14 @@ int main(int argc, char** argv) {
       output_polys.push_back(bitExprToANF(expr));
     }
   }
+  using namespace std::literals;
+  std::println("Modelling time: {}, peak mem: {}kB", timer.elapsed_as<std::chrono::milliseconds>(), bonc::backend_common::peak_rss_bytes().value_or(0) / 1024);
+  timer.reset();
   for (auto& poly : output_polys) {
     std::cout << std::clamp(numericMapping(poly), -1, std::numeric_limits<int>::max()) << ',';
   }
   std::cout << '\n';
+  std::println("Numeric mapping time: {}, peak mem: {}kB", timer.elapsed_as<std::chrono::milliseconds>(), bonc::backend_common::peak_rss_bytes().value_or(0) / 1024);
 
   // for (auto i = 0uz; i < output_polys.size(); i++) {
   //   if (i % (384 * 8) == 0) {

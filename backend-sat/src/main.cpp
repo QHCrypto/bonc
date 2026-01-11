@@ -2,6 +2,7 @@
 #include <sat_modeller.h>
 #include <sbox_and_input.h>
 #include <table_template.h>
+#include <perf.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/regex.hpp>
@@ -391,7 +392,7 @@ int main(int argc, char** argv) {
   // for (auto& expr : debug_outputs->update_expressions) {
   //   modeller.traverse(expr);
   // }
-
+  bonc::backend_common::Timer timer;
   for (auto& info : outputs) {
     std::cout << "Output: " << info.name << ", Size: " << info.size << "\n";
     for (auto& expr : info.expressions) {
@@ -406,6 +407,12 @@ int main(int argc, char** argv) {
     }
   }
   modeller.complete(max_weight);
+  std::println("Modelling time: {}, peak mem: {}kB",
+               timer.elapsed_as<std::chrono::milliseconds>(),
+               bonc::backend_common::peak_rss_bytes().value_or(0) / 1024);
+  std::println("Model variables: {}, clauses: {}",
+               modeller.model.variableSize(),
+               modeller.model.getClauses().size());
 
   if (vm.count("output")) {
     auto out_file = vm["output"].as<std::string>();
@@ -414,7 +421,11 @@ int main(int argc, char** argv) {
   }
 
   if (solve) {
+    timer.reset();
     auto values = bonc::solve(modeller.model);
+    std::println("Solving time: {}, peak mem: {}kB",
+                 timer.elapsed_as<std::chrono::milliseconds>(),
+                 bonc::backend_common::peak_rss_bytes().value_or(0) / 1024);
     if (!values) {
       std::println("UNSATISFIABLE");
       return 1;
