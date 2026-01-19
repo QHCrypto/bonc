@@ -34,7 +34,7 @@ set_target_properties(BUGSENG::ppl PROPERTIES IMPORTED_LOCATION ${PPL_LIB_REALPA
 target_link_libraries(BUGSENG::ppl INTERFACE GMP::gmp)
 target_include_directories(BUGSENG::ppl INTERFACE ${PPL_INSTALL_DIR}/include)
 
-install(IMPORTED_RUNTIME_ARTIFACTS BUGSENG::ppl LIBRARY DESTINATION lib)
+install(FILES ${PPL_LIB_REALPATH} DESTINATION lib)
 # 唉先这样吧
 # 0x000000000000000e (SONAME)             Library soname: [libppl.so.14]
 install(CODE "
