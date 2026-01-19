@@ -29,11 +29,14 @@ add_library(BUGSENG::ppl SHARED IMPORTED GLOBAL)
 add_dependencies(BUGSENG::ppl ppl_src)
 
 file(REAL_PATH "${PPL_INSTALL_DIR}/lib/libppl.so" PPL_LIB_REALPATH)
+get_filename_component(PPL_LIB_FILENAME "${PPL_LIB_REALPATH}" NAME)
 set_target_properties(BUGSENG::ppl PROPERTIES IMPORTED_LOCATION ${PPL_LIB_REALPATH})
 target_link_libraries(BUGSENG::ppl INTERFACE GMP::gmp)
 target_include_directories(BUGSENG::ppl INTERFACE ${PPL_INSTALL_DIR}/include)
 
 install(IMPORTED_RUNTIME_ARTIFACTS BUGSENG::ppl LIBRARY DESTINATION lib)
+# 唉先这样吧
+# 0x000000000000000e (SONAME)             Library soname: [libppl.so.14]
 install(CODE "
-  file(CREATE_LINK \"${PPL_LIB_REALPATH}\" \"\${CMAKE_INSTALL_PREFIX}/lib/libppl.so.14\" SYMBOLIC)
+  file(CREATE_LINK \"${PPL_LIB_FILENAME}\" \"\${CMAKE_INSTALL_PREFIX}/lib/libppl.so.14\" SYMBOLIC)
 ")
