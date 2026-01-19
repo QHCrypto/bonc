@@ -5,8 +5,8 @@ add_executable(bonc-backend-dp src/main.cpp src/polyhedron.cpp src/sbox_modellin
 target_link_libraries(bonc-backend-dp PRIVATE bonc-midend-common bonc-backend-common Boost::program_options BUGSENG::ppl)
 
 # Gurobi configuration, change to your own
-set(GUROBI_DIR "/opt/gurobi1103/linux64")
-set(GUROBI_VER "110")
+set(GUROBI_DIR "/opt/gurobi1103/linux64" CACHE STRING "Path to Gurobi installation")
+set(GUROBI_VER "110" CACHE STRING "Gurobi version number without dots")
 
 set(GUROBI_INCLUDE_DIR "${GUROBI_DIR}/include")
 set(GUROBI_LIBRARY "${GUROBI_DIR}/lib/libgurobi_c++.a")
