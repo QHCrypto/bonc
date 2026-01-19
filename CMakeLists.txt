@@ -26,3 +26,6 @@ add_subdirectory(backend-common)
 add_subdirectory(backend-nm)
 add_subdirectory(backend-sat)
 add_subdirectory(backend-dp)
+
+install(TARGETS bonc-backend-nm bonc-backend-sat bonc-backend-dp
+        RUNTIME DESTINATION bin)
