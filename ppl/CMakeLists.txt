@@ -28,8 +28,12 @@ file(MAKE_DIRECTORY ${PPL_INSTALL_DIR}/include)
 add_library(BUGSENG::ppl SHARED IMPORTED GLOBAL)
 add_dependencies(BUGSENG::ppl ppl_src)
 
-set_target_properties(BUGSENG::ppl PROPERTIES IMPORTED_LOCATION ${PPL_INSTALL_DIR}/lib/libppl.so)
+file(REAL_PATH "${PPL_INSTALL_DIR}/lib/libppl.so" PPL_LIB_REALPATH)
+set_target_properties(BUGSENG::ppl PROPERTIES IMPORTED_LOCATION ${PPL_LIB_REALPATH})
 target_link_libraries(BUGSENG::ppl INTERFACE GMP::gmp)
 target_include_directories(BUGSENG::ppl INTERFACE ${PPL_INSTALL_DIR}/include)
 
 install(IMPORTED_RUNTIME_ARTIFACTS BUGSENG::ppl LIBRARY DESTINATION lib)
+install(CODE "
+  file(CREATE_LINK \"${PPL_LIB_REALPATH}\" \"\${CMAKE_INSTALL_PREFIX}/lib/libppl.so.14\" SYMBOLIC)
+")
