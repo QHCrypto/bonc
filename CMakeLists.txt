@@ -8,7 +8,10 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  add_compile_options(-stdlib=libc++)
+  add_compile_options(-stdlib=libc++ -static)
+endif()
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_compile_options(-static-libgcc -static-libstdc++)
 endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
